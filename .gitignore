@@ -1,0 +1,47 @@
+# 依赖缓存
+node_modules/
+.pnpm-store/
+
+# 测试输出
+coverage/
+.nyc_output/
+
+# 构建输出
+dist/
+build/
+
+# 环境变量
+.env
+.env.local
+.env.*.local
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# 系统文件
+.DS_Store
+Thumbs.db
+
+# 日志
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.coverage
+htmlcov/
+*.egg-info/
+dist/
+build/
+
+# 数据文件
+data/*.json
+!data/.gitkeep
