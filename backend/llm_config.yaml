@@ -1,0 +1,84 @@
+# 大模型配置文件
+# LLM Configuration File
+
+# API配置
+api:
+  # API提供商 (openai, anthropic, azure, custom)
+  provider: "openai"
+
+  # API密钥 (请替换为你的实际API密钥)
+  api_key: "your-api-key-here"
+
+  # API基础URL (可选，用于自定义API端点)
+  base_url: "https://api.openai.com/v1"
+
+  # 超时时间（秒）
+  timeout: 60
+
+# 模型配置
+model:
+  # 主模型 (用于一般问答和分析)
+  primary: "gpt-4"
+
+  # 快速模型 (用于简单任务)
+  fast: "gpt-3.5-turbo"
+
+  # 最大token数
+  max_tokens: 2000
+
+  # 温度参数 (0-1, 越高越随机)
+  temperature: 0.7
+
+  # Top P参数
+  top_p: 0.9
+
+# 提示词配置
+prompts:
+  # 知识图谱分析提示词
+  graph_analysis: |
+    你是一个专业的数据分析师。请根据以下知识图谱查询结果，用自然语言总结关键信息和洞察。
+
+    要求：
+    1. 用简洁的中文回答
+    2. 突出重点实体和关系
+    3. 提供有价值的洞察和建议
+    4. 避免直接输出JSON格式
+
+    查询结果：
+    {query_result}
+
+    用户问题：
+    {user_question}
+
+    请提供分析总结：
+
+  # 事理图谱分析提示词
+  event_graph_analysis: |
+    你是一个专业的营销分析师。请根据以下事理图谱数据，分析用户行为模式和转化路径。
+
+    数据：
+    {event_data}
+
+    请提供：
+    1. 关键行为模式总结
+    2. 转化路径分析
+    3. 营销建议
+
+# 功能开关
+features:
+  # 是否启用AI增强分析
+  enable_ai_analysis: true
+
+  # 是否启用缓存
+  enable_cache: true
+
+  # 缓存过期时间（秒）
+  cache_ttl: 3600
+
+# 日志配置
+logging:
+  # 是否记录API调用
+  log_api_calls: true
+
+  # 是否记录提示词
+  log_prompts: false

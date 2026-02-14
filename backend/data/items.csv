@@ -1,0 +1,21 @@
+item_id,category,brand,series,name
+item_001,汽车,宝马,7系,宝马7系
+item_002,汽车,宝马,5系,宝马5系
+item_003,汽车,宝马,X5,宝马X5
+item_004,汽车,奔驰,S级,奔驰S级
+item_005,汽车,奔驰,E级,奔驰E级
+item_006,汽车,奔驰,GLC,奔驰GLC
+item_007,汽车,奥迪,A8,奥迪A8
+item_008,汽车,奥迪,A6,奥迪A6
+item_009,汽车,奥迪,Q7,奥迪Q7
+item_010,汽车,特斯拉,Model S,特斯拉Model S
+item_011,汽车,特斯拉,Model 3,特斯拉Model 3
+item_012,汽车,特斯拉,Model X,特斯拉Model X
+item_013,汽车,保时捷,Panamera,保时捷Panamera
+item_014,汽车,保时捷,Cayenne,保时捷Cayenne
+item_015,汽车,保时捷,911,保时捷911
+item_016,汽车,雷克萨斯,ES,雷克萨斯ES
+item_017,汽车,雷克萨斯,RX,雷克萨斯RX
+item_018,汽车,雷克萨斯,LX,雷克萨斯LX
+item_019,汽车,沃尔沃,S90,沃尔沃S90
+item_020,汽车,沃尔沃,XC90,沃尔沃XC90

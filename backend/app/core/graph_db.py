@@ -1,39 +1,90 @@
 """
-图数据库服务 - 基于NetworkX的内存图数据库
+图数据库服务 - 基于NetworkX的内存图数据库 + SQLite持久化
 后续可替换为Neo4j
 """
 import networkx as nx
-from typing import Dict, List, Any
+from typing import Dict, List, Any, Optional
 from collections import defaultdict
+from app.core.persistence import persistence
+from app.core.logger import app_logger
 
 class GraphDatabase:
-    """基于NetworkX的图数据库"""
-    
-    def __init__(self):
+    """基于NetworkX的图数据库（带持久化）"""
+
+    def __init__(self, enable_persistence: bool = True):
         self.knowledge_graph = nx.MultiDiGraph()
         self.event_graph = nx.DiGraph()
         self.entity_index = defaultdict(list)  # 实体索引
         self.relation_index = defaultdict(list)  # 关系索引
-    
+        self.enable_persistence = enable_persistence
+
+        # 启动时自动加载持久化数据
+        if self.enable_persistence:
+            self._load_from_persistence()
+    def _load_from_persistence(self):
+        """从持久化层加载数据"""
+        try:
+            app_logger.info("正在从持久化层加载知识图谱...")
+            entities = persistence.load_entities(limit=100000)
+            relations = persistence.load_relations(limit=100000)
+
+            for entity in entities:
+                self.knowledge_graph.add_node(
+                    entity["id"],
+                    type=entity["type"],
+                    **entity["properties"]
+                )
+                self.entity_index[entity["type"]].append(entity["id"])
+
+            for rel in relations:
+                if self.knowledge_graph.has_node(rel["from"]) and self.knowledge_graph.has_node(rel["to"]):
+                    self.knowledge_graph.add_edge(
+                        rel["from"],
+                        rel["to"],
+                        type=rel["type"],
+                        weight=rel.get("weight", 0.5)
+                    )
+                    self.relation_index[rel["type"]].append((rel["from"], rel["to"]))
+
+            app_logger.info(f"加载完成: {len(entities)} 个实体, {len(relations)} 个关系")
+        except Exception as e:
+            app_logger.warning(f"加载持久化数据失败: {e}")
+
     def clear_knowledge_graph(self):
         """清空知识图谱"""
         self.knowledge_graph.clear()
         self.entity_index.clear()
         self.relation_index.clear()
+
+        # 同步清空持久化数据
+        if self.enable_persistence:
+            persistence.clear_knowledge_graph()
     
     def create_entity(self, entity_id: str, entity_type: str, properties: Dict = None):
         """创建实体"""
-        self.knowledge_graph.add_node(entity_id, type=entity_type, **(properties or {}))
+        props = properties or {}
+        self.knowledge_graph.add_node(entity_id, type=entity_type, **props)
         self.entity_index[entity_type].append(entity_id)
         self.entity_index[f"type:{entity_type}"].append(entity_id)
-        return {"id": entity_id, "type": entity_type, "properties": properties or {}}
+
+        # 持久化到数据库
+        if self.enable_persistence:
+            persistence.save_entity(entity_id, entity_type, props)
+
+        return {"id": entity_id, "type": entity_type, "properties": props}
     
     def create_relation(self, from_id: str, to_id: str, rel_type: str, properties: Dict = None):
         """创建关系"""
         if self.knowledge_graph.has_node(from_id) and self.knowledge_graph.has_node(to_id):
-            self.knowledge_graph.add_edge(from_id, to_id, type=rel_type, **(properties or {}))
+            props = properties or {}
+            self.knowledge_graph.add_edge(from_id, to_id, type=rel_type, **props)
             self.relation_index[rel_type].append((from_id, to_id))
-            return {"from": from_id, "to": to_id, "type": rel_type, "properties": properties or {}}
+
+            # 持久化到数据库
+            if self.enable_persistence:
+                persistence.save_relation(from_id, to_id, rel_type, props)
+
+            return {"from": from_id, "to": to_id, "type": rel_type, "properties": props}
         return None
     
     def query_entities(self, entity_type: str = None, limit: int = 100) -> List[Dict]:
@@ -105,17 +156,63 @@ class GraphDatabase:
     
     def get_stats(self) -> Dict:
         """获取统计信息"""
-        return {
-            "total_entities": self.knowledge_graph.number_of_nodes(),
-            "total_relations": self.knowledge_graph.number_of_edges(),
-            "entity_types": len(self.entity_index),
-            "relation_types": len(self.relation_index)
-        }
+        if self.enable_persistence:
+            # 从持久化层获取准确统计
+            return persistence.get_stats()
+        else:
+            return {
+                "total_entities": self.knowledge_graph.number_of_nodes(),
+                "total_relations": self.knowledge_graph.number_of_edges(),
+                "entity_types": len(self.entity_index),
+                "relation_types": len(self.relation_index)
+            }
     
+    def batch_create_entities(self, entities: List[Dict]) -> int:
+        """批量创建实体（性能优化）"""
+        created_count = 0
+        for entity in entities:
+            self.knowledge_graph.add_node(
+                entity["id"],
+                type=entity["type"],
+                **entity.get("properties", {})
+            )
+            self.entity_index[entity["type"]].append(entity["id"])
+            created_count += 1
+
+        # 批量持久化
+        if self.enable_persistence:
+            persistence.batch_save_entities(entities)
+
+        return created_count
+
+    def batch_create_relations(self, relations: List[Dict]) -> int:
+        """批量创建关系（性能优化）"""
+        created_count = 0
+        for rel in relations:
+            if self.knowledge_graph.has_node(rel["from"]) and self.knowledge_graph.has_node(rel["to"]):
+                self.knowledge_graph.add_edge(
+                    rel["from"],
+                    rel["to"],
+                    type=rel["type"],
+                    **rel.get("properties", {})
+                )
+                self.relation_index[rel["type"]].append((rel["from"], rel["to"]))
+                created_count += 1
+
+        # 批量持久化
+        if self.enable_persistence:
+            persistence.batch_save_relations(relations)
+
+        return created_count
+
     # 事理图谱操作
     def clear_event_graph(self):
         """清空事理图谱"""
         self.event_graph.clear()
+
+        # 同步清空持久化数据
+        if self.enable_persistence:
+            persistence.clear_event_graph()
     
     def create_event_node(self, node_id: str, node_type: str, properties: Dict = None):
         """创建事理节点"""

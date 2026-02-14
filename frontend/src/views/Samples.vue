@@ -4,9 +4,14 @@
       <template #header>
         <div class="card-header">
           <span>样本管理</span>
-          <el-button type="primary" @click="handleGenerateSamples" :loading="loading">
-            生成样本
-          </el-button>
+          <div class="header-actions">
+            <el-button type="success" @click="showImportDialog = true" :loading="importing">
+              导入CSV
+            </el-button>
+            <el-button type="primary" @click="handleGenerateSamples" :loading="loading">
+              生成样本
+            </el-button>
+          </div>
         </div>
       </template>
       
@@ -102,64 +107,144 @@
       </el-col>
     </el-row>
     
+    <!-- 全量样本表格 -->
     <el-card style="margin-top: 20px" v-if="sampleData">
-      <template #header>典型案例</template>
-      <el-tabs v-model="activeTab">
-        <el-tab-pane label="正样本" name="positive">
-          <el-table :data="typicalCases.positive || []" size="small">
-            <el-table-column prop="user_id" label="用户ID" width="100" />
-            <el-table-column prop="profile.age_bucket" label="年龄" width="80" />
-            <el-table-column prop="profile.income" label="收入" width="80" />
-            <el-table-column prop="profile.city" label="城市" width="80" />
-            <el-table-column prop="intent" label="意向" width="60" />
-            <el-table-column prop="stage" label="阶段" width="80" />
-            <el-table-column label="兴趣" min-width="150">
-              <template #default="{ row }">
-                <el-tag v-for="i in row.interests" :key="i" size="small" type="info">
-                  {{ i }}
-                </el-tag>
-              </template>
-            </el-table-column>
-          </el-table>
-        </el-tab-pane>
-        <el-tab-pane label="流失样本" name="churn">
-          <el-table :data="typicalCases.churn || []" size="small">
-            <el-table-column prop="user_id" label="用户ID" width="100" />
-            <el-table-column prop="profile.age_bucket" label="年龄" width="80" />
-            <el-table-column prop="profile.income" label="收入" width="80" />
-            <el-table-column prop="brand.primary_brand" label="品牌" width="80" />
-            <el-table-column prop="stage" label="阶段" width="80" />
-          </el-table>
-        </el-tab-pane>
-        <el-tab-pane label="弱兴趣样本" name="weak">
-          <el-table :data="typicalCases.weak || []" size="small">
-            <el-table-column prop="user_id" label="用户ID" width="100" />
-            <el-table-column prop="profile.income" label="收入" width="80" />
-            <el-table-column prop="intent" label="意向" width="60" />
-          </el-table>
-        </el-tab-pane>
-        <el-tab-pane label="空白对照" name="control">
-          <el-table :data="typicalCases.control || []" size="small">
-            <el-table-column prop="user_id" label="用户ID" width="100" />
-            <el-table-column prop="profile.income" label="收入" width="80" />
-          </el-table>
-        </el-tab-pane>
-      </el-tabs>
+      <template #header>
+        <div class="card-header">
+          <span>全量样本数据</span>
+          <div class="header-actions">
+            <el-select v-model="viewType" placeholder="选择查看类型" style="width: 150px" @change="currentPage = 1">
+              <el-option label="正样本" value="positive" />
+              <el-option label="流失样本" value="churn" />
+              <el-option label="弱兴趣样本" value="weak" />
+              <el-option label="空白对照" value="control" />
+              <el-option label="全部" value="all" />
+            </el-select>
+            <el-button type="primary" size="small" @click="exportSamples">导出CSV</el-button>
+          </div>
+        </div>
+      </template>
+      
+      <el-table 
+        :data="paginatedSamples" 
+        v-loading="loading"
+        stripe
+        border
+        max-height="500"
+        style="width: 100%"
+      >
+        <el-table-column prop="user_id" label="用户ID" width="100" fixed />
+        <el-table-column label="人口属性" min-width="200">
+          <template #default="{ row }">
+            <span>{{ row.profile?.age_bucket || row.demographics?.age_bucket || '-' }}</span> /
+            <span>{{ row.profile?.income || row.demographics?.income_level || '-' }}</span> /
+            <span>{{ row.profile?.city || row.demographics?.city_tier || '-' }}</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="品牌偏好" min-width="150">
+          <template #default="{ row }">
+            <el-tag size="small" type="warning">{{ row.brand?.primary_brand || row.brand_affinity?.primary_brand || '-' }}</el-tag>
+            <span style="margin-left: 8px;">{{ ((row.brand?.brand_score || row.brand_affinity?.brand_score || 0) * 100).toFixed(0) }}%</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="兴趣标签" min-width="200">
+          <template #default="{ row }">
+            <el-tag 
+              v-for="interest in (row.interests || []).slice(0, 4)" 
+              :key="interest" 
+              size="small" 
+              type="info"
+              style="margin-right: 4px;"
+            >
+              {{ interest }}
+            </el-tag>
+            <el-tag v-if="(row.interests || []).length > 4" size="small" type="info">
+              +{{ (row.interests || []).length - 4 }}
+            </el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column prop="intent" label="购买意向" width="100">
+          <template #default="{ row }">
+            <el-tag :type="getIntentType(row.intent || row.purchase_intent)">
+              {{ row.intent || row.purchase_intent || '-' }}
+            </el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column prop="stage" label="生命周期" width="100">
+          <template #default="{ row }">
+            <el-tag :type="getStageType(row.stage || row.lifecycle_stage)">
+              {{ row.stage || row.lifecycle_stage || '-' }}
+            </el-tag>
+          </template>
+        </el-table-column>
+      </el-table>
+      
+      <!-- 分页 -->
+      <div class="pagination-container" v-if="currentSamples.length > 0">
+        <el-pagination
+          v-model:current-page="currentPage"
+          :page-size="pageSize"
+          :total="currentSamples.length"
+          layout="total, prev, pager, next, jumper"
+          @current-change="handlePageChange"
+        />
+        <span class="pagination-info">
+          显示 {{ (currentPage - 1) * pageSize + 1 }} - {{ Math.min(currentPage * pageSize, currentSamples.length) }} 条，
+          共 {{ currentSamples.length }} 条
+        </span>
+      </div>
     </el-card>
+    
+    <!-- CSV导入对话框 -->
+    <el-dialog v-model="showImportDialog" title="导入用户数据" width="500px">
+      <el-upload
+        ref="uploadRef"
+        class="upload-demo"
+        drag
+        :auto-upload="false"
+        :on-change="handleFileChange"
+        :limit="1"
+        accept=".csv"
+      >
+        <el-icon class="el-icon--upload"><upload-filled /></el-icon>
+        <div class="el-upload__text">
+          拖拽CSV文件到此处，或 <em>点击上传</em>
+        </div>
+        <template #tip>
+          <div class="el-upload__tip">
+            <p>支持字段: user_id, age, age_bucket, gender, income_level, city_tier, occupation, interests, primary_brand, brand_score, purchase_intent, lifecycle_stage</p>
+          </div>
+        </template>
+      </el-upload>
+      
+      <template #footer>
+        <el-button @click="showImportDialog = false">取消</el-button>
+        <el-button type="primary" @click="handleImportCSV" :loading="importing" :disabled="!selectedFile">
+          导入并分析
+        </el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
 <script setup>
-import { ref, reactive, computed } from 'vue'
+import { ref, reactive, computed, watch } from 'vue'
 import { ElMessage } from 'element-plus'
-import { doGenerateSamples } from '../api'
+import { UploadFilled } from '@element-plus/icons-vue'
+import { generateSamples, importCSV, inferUsers } from '../api'
 
 const formRef = ref(null)
+const uploadRef = ref(null)
 const loading = ref(false)
+const importing = ref(false)
 const sampleData = ref(null)
 const sampleStatistics = ref({})
-const typicalCases = ref({})
-const activeTab = ref('positive')
+const showImportDialog = ref(false)
+const selectedFile = ref(null)
+const viewType = ref('positive')
+const currentPage = ref(1)
+const pageSize = ref(50)
+const inferenceResults = ref({})
 
 const form = reactive({
   industry: '汽车',
@@ -181,6 +266,29 @@ const totalRatio = computed(() => {
   return form.ratios.positive + form.ratios.churn + form.ratios.weak + form.ratios.control
 })
 
+// 获取当前视图的样本数据
+const currentSamples = computed(() => {
+  if (!sampleData.value) return []
+  
+  if (viewType.value === 'all') {
+    return [
+      ...(sampleData.value.positive || []),
+      ...(sampleData.value.churn || []),
+      ...(sampleData.value.weak || []),
+      ...(sampleData.value.control || [])
+    ]
+  }
+  
+  return sampleData.value[viewType.value] || []
+})
+
+// 分页数据
+const paginatedSamples = computed(() => {
+  const start = (currentPage.value - 1) * pageSize.value
+  const end = start + pageSize.value
+  return currentSamples.value.slice(start, end)
+})
+
 const handleGenerateSamples = async () => {
   if (!formRef.value) return
   
@@ -189,7 +297,7 @@ const handleGenerateSamples = async () => {
     
     loading.value = true
     try {
-      const res = await doGenerateSamples({
+      const res = await generateSamples({
         industry: form.industry,
         total_count: form.total_count,
         ratios: form.ratios
@@ -197,23 +305,149 @@ const handleGenerateSamples = async () => {
       
       sampleData.value = res.data
       
-      const samples = res.data  // samples 直接在 data 下
-      typicalCases.value = {
-        positive: samples.positive?.slice(0, 5) || [],
-        churn: samples.churn?.slice(0, 5) || [],
-        weak: samples.weak?.slice(0, 5) || [],
-        control: samples.control?.slice(0, 5) || []
+      // 计算统计信息
+      const stats = {}
+      for (const type of ['positive', 'churn', 'weak', 'control']) {
+        const data = res.data[type] || []
+        stats[type] = computeTypeStats(data)
       }
+      sampleStatistics.value = stats
       
-      sampleStatistics.value = res.data.statistics || {}
+      // 重置分页
+      currentPage.value = 1
+      viewType.value = 'positive'
       
-      ElMessage.success('样本生成成功')
+      ElMessage.success(`样本生成成功，共 ${dataSummary(res.data)} 条`)
     } catch (e) {
       ElMessage.error('生成失败: ' + (e.response?.data?.detail || e.message))
     } finally {
       loading.value = false
     }
   })
+}
+
+const computeTypeStats = (data) => {
+  if (!data.length) return { count: 0 }
+  
+  const incomes = data.map(u => u.profile?.income || u.demographics?.income_level).filter(Boolean)
+  const incomeDist = {}
+  incomes.forEach(i => incomeDist[i] = (incomeDist[i] || 0) + 1)
+  
+  const interests = data.flatMap(u => u.interests || []).filter(Boolean)
+  const interestFreq = {}
+  interests.forEach(i => interestFreq[i] = (interestFreq[i] || 0) + 1)
+  
+  const brands = data.map(u => u.brand?.primary_brand || u.brand_affinity?.primary_brand).filter(Boolean)
+  const brandDist = {}
+  brands.forEach(b => brandDist[b] = (brandDist[b] || 0) + 1)
+  
+  return {
+    count: data.length,
+    income_distribution: incomeDist,
+    top_interests: Object.entries(interestFreq).sort((a, b) => b[1] - a[1]),
+    brand_distribution: brandDist
+  }
+}
+
+const dataSummary = (data) => {
+  return (data.positive?.length || 0) + 
+         (data.churn?.length || 0) + 
+         (data.weak?.length || 0) + 
+         (data.control?.length || 0)
+}
+
+const handleFileChange = (file) => {
+  selectedFile.value = file.raw
+}
+
+const handleImportCSV = async () => {
+  if (!selectedFile.value) {
+    ElMessage.warning('请先选择CSV文件')
+    return
+  }
+  
+  importing.value = true
+  try {
+    const formData = new FormData()
+    formData.append('file', selectedFile.value)
+    
+    const res = await importCSV(formData)
+    
+    if (res.code === 0) {
+      // 存储样本数据
+      sampleData.value = res.data.samples
+      sampleStatistics.value = res.data.statistics
+      
+      // 执行推理
+      const allUsers = [
+        ...(res.data.samples.positive || []),
+        ...(res.data.samples.churn || []),
+        ...(res.data.samples.weak || []),
+        ...(res.data.samples.control || [])
+      ]
+      
+      const inferRes = await inferUsers({ users: allUsers })
+      if (inferRes.code === 0) {
+        inferenceResults.value = {}
+        inferRes.data.results.forEach(r => {
+          inferenceResults.value[r.user_id] = r
+        })
+      }
+      
+      showImportDialog.value = false
+      currentPage.value = 1
+      viewType.value = 'positive'
+      
+      ElMessage.success(`导入成功，共 ${res.data.total_count} 条用户数据`)
+    }
+  } catch (e) {
+    ElMessage.error('导入失败: ' + (e.response?.data?.detail || e.message))
+  } finally {
+    importing.value = false
+  }
+}
+
+const handlePageChange = (page) => {
+  currentPage.value = page
+}
+
+const getIntentType = (intent) => {
+  const map = { '高': 'success', '中': 'warning', '无': 'info' }
+  return map[intent] || 'info'
+}
+
+const getStageType = (stage) => {
+  const map = { '转化': 'success', '意向': 'warning', '流失': 'danger', '空白': 'info' }
+  return map[stage] || 'info'
+}
+
+const exportSamples = () => {
+  const data = currentSamples.value
+  if (!data.length) {
+    ElMessage.warning('没有可导出的数据')
+    return
+  }
+  
+  const headers = ['user_id', '年龄', '收入', '城市', '品牌', '兴趣', '意向', '阶段']
+  const rows = data.map(u => [
+    u.user_id,
+    u.profile?.age_bucket || u.demographics?.age_bucket || '',
+    u.profile?.income || u.demographics?.income_level || '',
+    u.profile?.city || u.demographics?.city_tier || '',
+    u.brand?.primary_brand || u.brand_affinity?.primary_brand || '',
+    (u.interests || []).join(';'),
+    u.intent || u.purchase_intent || '',
+    u.stage || u.lifecycle_stage || ''
+  ])
+  
+  const csvContent = [headers, ...rows].map(r => r.join(',')).join('\n')
+  const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' })
+  const link = document.createElement('a')
+  link.href = URL.createObjectURL(blob)
+  link.download = `samples_${viewType.value}_${Date.now()}.csv`
+  link.click()
+  
+  ElMessage.success('导出成功')
 }
 </script>
 

@@ -1,5 +1,6 @@
 """
-汽车行业Mock数据 - 模拟5亿用户中的样本数据
+汽车行业Mock数据 - 模拟真实用户行为数据
+包含：通勤距离、婚姻状况、生子信息、APP使用、搜索浏览、比价、付费、广告数据、位置、天气等
 """
 import random
 from typing import List, Dict
@@ -29,17 +30,40 @@ INTEREST_CATEGORIES = {
     "生活": ["旅游", "美食", "时尚", "汽车", "科技"]
 }
 
+CITIES = ["北京", "上海", "广州", "深圳", "杭州", "成都", "重庆", "武汉", "西安", "南京"]
+EDUCATION_LEVELS = ["高中", "大专", "本科", "硕士", "博士"]
+MARITAL_STATUS = ["未婚", "已婚", "订婚", "离异"]
+PHONE_PRICES = ["1000-3000", "3000-5000", "5000-8000", "8000+"]
+WEATHER_CONDITIONS = ["晴", "多云", "阴", "雨", "雪"]
+
 _age_buckets = ["25-30", "30-40", "40-50", "50+"]
 
 def generate_user(user_id: str) -> Dict:
+    """生成包含完整汽车行业行为数据的用户"""
     income = random.choices(
         list(INCOME_DISTRIBUTION.keys()),
         weights=list(INCOME_DISTRIBUTION.values())
     )[0]
-    
+
     age = random.randint(25, 55)
     age_bucket = _age_buckets[0] if age < 30 else _age_buckets[1] if age < 40 else _age_buckets[2] if age < 50 else _age_buckets[3]
-    
+    gender = random.choice(["男", "女"])
+
+    # 基础信息
+    city = random.choice(CITIES)
+    education = random.choice(EDUCATION_LEVELS)
+    marital = random.choice(MARITAL_STATUS)
+    has_children = random.choice([True, False]) if marital == "已婚" else False
+
+    # 资产信息
+    has_house = random.random() > 0.3  # 70%有房
+    has_car = random.random() > 0.4    # 60%有车
+    phone_price = random.choice(PHONE_PRICES)
+
+    # 通勤距离（公里）
+    commute_distance = round(random.uniform(5, 50), 1) if random.random() > 0.2 else 0
+
+    # 兴趣爱好
     num_interests = random.randint(2, 5)
     selected_interests = []
     for _ in range(num_interests):
@@ -47,37 +71,190 @@ def generate_user(user_id: str) -> Dict:
         interest = random.choice(INTEREST_CATEGORIES[category])
         if interest not in selected_interests:
             selected_interests.append(interest)
-    
+
+    # 品牌和车型
     brand = random.choice(list(BRAND_PREFERENCES.keys()))
     model = random.choice(list(BRAND_PREFERENCES[brand].keys()))
-    
-    behaviors = generate_behaviors(brand, model, selected_interests)
-    intent_level = calculate_intent(behaviors)
-    
+    brand_score = BRAND_PREFERENCES[brand][model] + random.uniform(-0.1, 0.1)
+    brand_score = max(0.1, min(1.0, brand_score))
+
+    # APP使用行为
+    app_open_count = random.randint(0, 100)
+    app_usage_duration = random.randint(0, 3600)  # 秒
+    miniprogram_open_count = random.randint(0, 50)
+
+    # 汽车相关行为
+    car_search_count = random.randint(0, 30)
+    car_browse_count = random.randint(0, 50)
+    car_compare_count = random.randint(0, 15)
+    car_app_payment = random.random() > 0.9  # 10%付费
+
+    # 广告和消息数据
+    push_exposure = random.randint(0, 200)
+    push_click = random.randint(0, push_exposure // 10)
+    ad_exposure = random.randint(0, 500)
+    ad_click = random.randint(0, ad_exposure // 20)
+
+    # 位置数据
+    near_4s_store = random.random() > 0.7  # 30%在4S店附近
+    weather_info = random.choice(WEATHER_CONDITIONS)
+
+    # 消费频率（每月）
+    consumption_frequency = random.randint(0, 20)
+
+    # 生成行为列表
+    behaviors = generate_enhanced_behaviors(
+        brand, model, selected_interests,
+        car_search_count, car_browse_count, car_compare_count
+    )
+
+    # 计算购买意向
+    intent_level = calculate_enhanced_intent(
+        behaviors, car_search_count, car_browse_count,
+        car_compare_count, app_open_count, near_4s_store
+    )
+
     return {
+        # 基础标识
         "user_id": user_id,
-        "demographics": {
-            "age": age,
-            "age_bucket": age_bucket,
-            "gender": random.choice(["男", "女"]),
-            "income_level": income,
-            "city_tier": random.choice(["一线", "新一线", "二线", "三线"]),
-            "occupation": random.choice(["企业高管", "中层管理", "技术专家", "自由职业", "公务员"])
-        },
+
+        # 人口统计信息
+        "age": age,
+        "age_bucket": age_bucket,
+        "gender": gender,
+        "education": education,
+        "income_level": income,
+        "city": city,
+        "city_tier": random.choice(["一线", "新一线", "二线", "三线"]),
+        "occupation": random.choice(["企业高管", "中层管理", "技术专家", "自由职业", "公务员"]),
+
+        # 资产信息
+        "has_house": has_house,
+        "has_car": has_car,
+        "phone_price": phone_price,
+
+        # 家庭信息
+        "marital_status": marital,
+        "has_children": has_children,
+        "commute_distance": commute_distance,
+
+        # 兴趣和行为
         "interests": selected_interests,
         "behaviors": behaviors,
-        "brand_affinity": {
-            "primary_brand": brand,
-            "primary_model": model,
-            "brand_score": BRAND_PREFERENCES[brand][model]
-        },
+
+        # 品牌偏好
+        "primary_brand": brand,
+        "primary_model": model,
+        "brand_score": round(brand_score, 2),
+
+        # 购买意向
         "purchase_intent": intent_level["level"],
         "intent_score": intent_level["score"],
         "lifecycle_stage": intent_level["stage"],
+
+        # APP使用行为
+        "app_open_count": app_open_count,
+        "app_usage_duration": app_usage_duration,
+        "miniprogram_open_count": miniprogram_open_count,
+
+        # 汽车相关行为
+        "car_search_count": car_search_count,
+        "car_browse_count": car_browse_count,
+        "car_compare_count": car_compare_count,
+        "car_app_payment": car_app_payment,
+
+        # 广告和消息
+        "push_exposure": push_exposure,
+        "push_click": push_click,
+        "ad_exposure": ad_exposure,
+        "ad_click": ad_click,
+
+        # 位置和天气
+        "near_4s_store": near_4s_store,
+        "weather_info": weather_info,
+
+        # 消费行为
+        "consumption_frequency": consumption_frequency,
+
+        # 行业标识
         "industry": INDUSTRY
     }
 
+def generate_enhanced_behaviors(
+    brand: str,
+    model: str,
+    interests: List[str],
+    search_count: int,
+    browse_count: int,
+    compare_count: int
+) -> List[str]:
+    """生成增强的行为列表（简化版，返回行为标签）"""
+    behaviors = []
+
+    # 汽车相关行为
+    if search_count > 0:
+        behaviors.append("汽车搜索")
+    if browse_count > 0:
+        behaviors.append("汽车浏览")
+    if compare_count > 0:
+        behaviors.append("比价行为")
+
+    # 品牌相关行为
+    if search_count > 5 or browse_count > 10:
+        behaviors.append(f"{brand}品牌关注")
+
+    # 兴趣相关行为
+    for interest in interests[:3]:
+        behaviors.append(f"{interest}相关内容浏览")
+
+    return behaviors
+
+
+def calculate_enhanced_intent(
+    behaviors: List[str],
+    search_count: int,
+    browse_count: int,
+    compare_count: int,
+    app_open_count: int,
+    near_4s_store: bool
+) -> Dict:
+    """基于多维度行为计算购买意向"""
+    score = 0.0
+
+    # 搜索行为权重
+    score += min(search_count * 0.02, 0.3)
+
+    # 浏览行为权重
+    score += min(browse_count * 0.01, 0.2)
+
+    # 比价行为权重（强意向信号）
+    score += min(compare_count * 0.03, 0.25)
+
+    # APP使用频率
+    score += min(app_open_count * 0.002, 0.15)
+
+    # 4S店附近（强意向信号）
+    if near_4s_store:
+        score += 0.15
+
+    # 归一化到0-1
+    score = min(score, 1.0)
+
+    # 确定意向等级和生命周期阶段
+    if score >= 0.7:
+        return {"level": "高", "score": round(score, 2), "stage": "转化"}
+    elif score >= 0.5:
+        return {"level": "中", "score": round(score, 2), "stage": "意向"}
+    elif score >= 0.3:
+        return {"level": "低", "score": round(score, 2), "stage": "考虑"}
+    elif score >= 0.1:
+        return {"level": "弱", "score": round(score, 2), "stage": "认知"}
+    else:
+        return {"level": "无", "score": round(score, 2), "stage": "空白"}
+
+
 def generate_behaviors(brand: str, model: str, interests: List[str]) -> List[Dict]:
+    """旧版行为生成函数（保持兼容性）"""
     behaviors = []
     num_brand_actions = random.randint(1, 10)
     for i in range(num_brand_actions):
@@ -88,7 +265,7 @@ def generate_behaviors(brand: str, model: str, interests: List[str]) -> List[Dic
             "model": model,
             "context": random.choice(["APP", "官网", "经销商", "朋友圈广告"])
         })
-    
+
     for interest in interests[:2]:
         num_interest_actions = random.randint(1, 5)
         for _ in range(num_interest_actions):
@@ -97,13 +274,15 @@ def generate_behaviors(brand: str, model: str, interests: List[str]) -> List[Dic
                 "topic": interest,
                 "app_category": random.choice(["资讯", "社交", "短视频"])
             })
-    
+
     random.shuffle(behaviors)
     return behaviors
 
+
 def calculate_intent(behaviors: List[Dict]) -> Dict:
+    """旧版意向计算函数（保持兼容性）"""
     brand_actions = [b for b in behaviors if "brand" in b]
-    
+
     if len(brand_actions) >= 8:
         has_inquiry = any(b["action"] == "询价" for b in brand_actions)
         if has_inquiry:

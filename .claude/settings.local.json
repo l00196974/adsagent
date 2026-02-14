@@ -1,0 +1,31 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(dir:*)",
+      "Bash(findstr:*)",
+      "Bash(test:*)",
+      "Bash(python -c:*)",
+      "Bash(python:*)",
+      "Bash(curl:*)",
+      "Bash(sqlite3:*)",
+      "Bash(pip install:*)",
+      "Bash(npx skills-installer:*)",
+      "Bash(claude skill:*)",
+      "Bash(tasklist:*)",
+      "Bash(taskkill:*)",
+      "Bash(timeout 5 bash -c \"sleep 2 && curl -s http://localhost:8000/health\")",
+      "Bash(timeout 3 bash -c \"sleep 1 && curl -X POST http://localhost:8000/api/v1/samples/import-batch -F ''files=@test_data/01_user_basic_info.csv'' -s\")",
+      "Bash(timeout 5 bash -c \"sleep 2 && curl -X POST http://localhost:8000/api/v1/samples/import-batch -F ''files=@test_data/01_user_basic_info.csv'' -s\")",
+      "Bash(Get-Content:*)",
+      "Bash(timeout 8 bash -c \"sleep 5 && curl -X POST http://localhost:8000/api/v1/samples/import-batch -F ''files=@test_data/01_user_basic_info.csv'' -s | python -m json.tool\")",
+      "Bash(claude mcp add:*)",
+      "Bash(timeout 3 bash -c \"sleep 1 && curl -s http://localhost:8000/api/v1/graphs/knowledge/query?depth=1 | python -m json.tool | head -50\")",
+      "Bash(timeout 5 bash -c \"sleep 3 && cd backend && python -c ''from app.services.field_detector import field_detector; cols = [\"\"age\"\", \"\"app_usage_duration\"\"]; mapping = field_detector.auto_detect_fields\\(cols\\); print\\(\"\"Mapping:\"\", mapping\\)''\")",
+      "Bash(timeout 5 bash -c \"sleep 2 && curl -X POST http://localhost:8000/api/v1/samples/import-batch -F ''files=@test_data/01_user_basic_info.csv'' -F ''files=@test_data/02_user_behavior.csv'' -s | python -m json.tool | grep -A 5 ''\"\"user_id\"\": \"\"U000001\"\"''\")",
+      "Bash(timeout:*)",
+      "Bash(D:workplaceadsagent.venv3Scriptspython.exe D:workplaceadsagentbackendmain.py)",
+      "Bash(/d/workplace/adsagent/.venv3/Scripts/python.exe main.py)",
+      "Bash(powershell -Command:*)"
+    ]
+  }
+}

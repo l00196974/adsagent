@@ -1,0 +1,11 @@
+user_id,age,gender,income_level,city,education,marital_status,has_children,has_house,has_car,phone_price,commute_distance,interests,primary_brand,primary_model,brand_score,purchase_intent,lifecycle_stage,app_open_count,app_usage_duration,miniprogram_open_count,car_search_count,car_browse_count,car_compare_count,car_app_payment,push_exposure,push_click,ad_exposure,ad_click,near_4s_store,weather_info,consumption_frequency
+U000001,35,男,高收入,北京,本科,已婚,True,True,True,8000+,15.5,"高尔夫,财经,旅游",宝马,7系,0.85,高,转化,45,1800,12,15,25,8,True,120,15,350,18,True,晴,12
+U000002,28,女,中等收入,上海,硕士,未婚,False,False,False,5000-8000,8.2,"网球,美食,时尚",奔驰,C级,0.65,中,意向,32,1200,8,8,12,3,False,80,8,200,10,False,多云,8
+U000003,42,男,超高收入,深圳,博士,已婚,True,True,True,8000+,22.3,"投资,汽车,科技",奔驰,S级,0.92,高,转化,68,2400,18,22,35,12,True,150,20,420,25,True,晴,15
+U000004,31,女,高收入,广州,本科,订婚,False,True,True,5000-8000,12.8,"游泳,商业,旅游",宝马,5系,0.78,中,意向,38,1500,10,12,18,5,False,95,10,280,14,False,阴,10
+U000005,38,男,中等收入,杭州,大专,已婚,True,True,True,3000-5000,18.5,"跑步,房产,美食",奥迪,A6,0.72,低,考虑,28,900,6,5,10,2,False,65,6,180,8,False,雨,6
+U000006,45,男,高收入,成都,硕士,已婚,True,True,True,8000+,25.0,"高尔夫,财经,汽车",宝马,7系,0.88,高,转化,52,2100,15,18,28,10,True,135,18,380,22,True,晴,14
+U000007,29,女,低收入,重庆,本科,未婚,False,False,False,1000-3000,5.5,"时尚,美食,旅游",特斯拉,Model 3,0.55,弱,认知,18,600,4,3,6,1,False,45,4,120,5,False,多云,4
+U000008,36,男,超高收入,武汉,博士,已婚,True,True,True,8000+,20.0,"投资,商业,科技",奔驰,S级,0.95,高,转化,72,2600,20,25,38,15,True,160,22,450,28,True,晴,16
+U000009,33,女,高收入,西安,硕士,已婚,False,True,True,5000-8000,14.2,"网球,财经,时尚",奥迪,A8,0.80,中,意向,42,1650,11,10,15,6,False,100,12,300,16,False,阴,11
+U000010,40,男,中等收入,南京,本科,已婚,True,True,True,3000-5000,16.8,"高尔夫,房产,汽车",宝马,5系,0.75,低,考虑,30,1000,7,6,12,3,False,70,7,200,9,False,雨,7

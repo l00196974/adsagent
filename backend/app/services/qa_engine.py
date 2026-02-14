@@ -102,3 +102,65 @@ class QAEngine:
             "sources": {"knowledge_graph": True, "event_graph": True},
             "intent": intent
         }
+    
+    def _parse_question_to_query(self, question: str) -> Dict:
+        """解析问题生成查询参数"""
+        keywords = self._extract_keywords(question)
+        intent = self._classify_intent(question)
+        
+        # 推断实体类型
+        entity_type = None
+        keyword = ""
+        
+        for kw in keywords:
+            if kw in ["宝马", "奔驰", "奥迪", "特斯拉"]:
+                entity_type = "Brand"
+                keyword = kw
+                break
+            elif kw in ["7系", "S级", "A8", "5系", "E级", "Model S", "Model 3"]:
+                entity_type = "Model"
+                keyword = kw
+                break
+            elif kw in ["高尔夫", "网球", "商务", "旅游", "科技", "投资"]:
+                entity_type = "Interest"
+                keyword = kw
+                break
+        
+        # 如果没识别出实体类型，查找用户
+        if not entity_type:
+            if any(x in question for x in ["用户", "什么样的人", "哪些人"]):
+                entity_type = "User"
+        
+        return {
+            "question": question,
+            "keywords": keywords,
+            "intent": intent,
+            "entity_type": entity_type,
+            "keyword": keyword
+        }
+    
+    def _generate_query_summary(self, question: str, query_params: Dict) -> str:
+        """生成查询摘要"""
+        parts = []
+        
+        entity_type = query_params.get("entity_type", "")
+        keyword = query_params.get("keyword", "")
+        intent = query_params.get("intent", "")
+        
+        if entity_type == "Brand":
+            parts.append(f"查询品牌【{keyword}】相关的图谱数据")
+        elif entity_type == "Model":
+            parts.append(f"查询车型【{keyword}】相关的图谱数据")
+        elif entity_type == "Interest":
+            parts.append(f"查询兴趣【{keyword}】相关的图谱数据")
+        elif entity_type == "User":
+            parts.append("查询用户群体相关的图谱数据")
+        
+        if intent == "comparison":
+            parts.append("（对比分析）")
+        elif intent == "recommendation":
+            parts.append("（推荐分析）")
+        elif intent == "churn_analysis":
+            parts.append("（流失分析）")
+        
+        return "".join(parts) if parts else "查询全部图谱数据"
