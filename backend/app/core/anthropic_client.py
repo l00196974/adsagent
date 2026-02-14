@@ -31,25 +31,197 @@ class AnthropicClient:
     ) -> str:
         model = model or self.primary_model
         try:
-            logger.info(f"调用LLM: model={model}, max_tokens={max_tokens}")
+            logger.info(f"调用LLM: model={model}, max_tokens={max_tokens}, base_url={self.client.base_url}")
+            logger.debug(f"LLM请求prompt: {prompt[:200]}...")  # 记录前200字符
+
             response = await self.client.chat.completions.create(
                 model=model,
                 max_tokens=max_tokens,
                 temperature=temperature,
                 messages=[{"role": "user", "content": prompt}]
             )
-            logger.info(f"LLM响应对象: {response}")
+
             result = response.choices[0].message.content if response.choices else ""
-            logger.info(f"LLM响应内容: [{result}]")
-            logger.info(f"LLM响应长度: {len(result)} 字符")
+            logger.info(f"LLM响应成功: 长度={len(result)}字符")
+            logger.debug(f"LLM完整响应: [{result}]")
             return result
         except Exception as e:
-            logger.error(f"LLM调用失败: {e}", exc_info=True)
+            logger.error(f"LLM调用失败: model={model}, base_url={self.client.base_url}, error={str(e)}", exc_info=True)
             raise
+
+    async def generate_app_tags_batch(self, apps: List[Dict]) -> Dict[str, List[str]]:
+        """批量为APP生成标签
+
+        Args:
+            apps: APP列表，每个元素包含 app_id, app_name, category
+
+        Returns:
+            字典，key为app_id，value为标签列表
+        """
+        logger.info(f"开始批量为 {len(apps)} 个APP生成标签")
+
+        # 构建批量请求的prompt
+        app_list_str = "\n".join([
+            f"{i+1}. APP名称: {app['app_name']}, 分类: {app.get('category', '未知')}"
+            for i, app in enumerate(apps)
+        ])
+
+        prompt = f"""你是一个移动应用分析专家。请为以下 {len(apps)} 个APP生成标签。
+
+APP列表:
+{app_list_str}
+
+要求:
+1. 为每个APP生成3-5个精准的标签
+2. 标签应该描述APP的核心功能、用户群体、使用场景
+3. 标签要简洁(2-4个中文字)
+4. 必须返回JSON对象格式，key为APP名称，value为标签数组
+
+输出格式示例:
+{{
+  "微信": ["社交", "即时通讯", "移动支付", "朋友圈"],
+  "抖音": ["短视频", "娱乐", "内容创作", "年轻人"],
+  "淘宝": ["电商", "购物", "网购", "在线支付"],
+  "美团": ["外卖", "本地生活", "团购", "配送"],
+  "滴滴": ["出行", "打车", "网约车", "交通"]
+}}
+
+请严格按照上述JSON格式输出，不要添加任何其他说明文字:"""
+
+        try:
+            response = await self.chat_completion(prompt, max_tokens=4000)
+            original_response = response
+            logger.debug(f"批量APP打标原始响应: [{original_response[:500]}...]")
+
+            # 移除MiniMax的<think>标签
+            if '<think>' in response:
+                response = response.split('</think>')[-1].strip()
+                logger.debug(f"移除<think>后: [{response[:500]}...]")
+
+            # 提取JSON对象
+            import re
+            json_match = re.search(r'\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}', response, re.DOTALL)
+            if json_match:
+                json_str = json_match.group(0)
+                tags_dict = json.loads(json_str)
+
+                # 将APP名称映射回app_id
+                result = {}
+                for app in apps:
+                    app_name = app['app_name']
+                    if app_name in tags_dict:
+                        tags = tags_dict[app_name]
+                        if isinstance(tags, list):
+                            result[app['app_id']] = tags
+                            logger.info(f"✓ APP [{app_name}] 标签: {tags}")
+                        else:
+                            result[app['app_id']] = []
+                            logger.warning(f"✗ APP [{app_name}] 标签格式错误: {tags}")
+                    else:
+                        result[app['app_id']] = []
+                        logger.warning(f"✗ APP [{app_name}] 未在响应中找到")
+
+                logger.info(f"✓ 批量打标完成: 成功 {len([v for v in result.values() if v])}/{len(apps)}")
+                return result
+            else:
+                logger.error(f"✗ 批量APP打标未找到JSON对象, 原始响应=[{original_response}], 处理后=[{response}]")
+                return {app['app_id']: [] for app in apps}
+
+        except json.JSONDecodeError as e:
+            logger.error(f"✗ 批量APP打标JSON解析失败: {e}, 响应=[{response[:500]}...]", exc_info=True)
+            return {app['app_id']: [] for app in apps}
+        except Exception as e:
+            logger.error(f"✗ 批量APP打标异常: {type(e).__name__}: {str(e)}", exc_info=True)
+            return {app['app_id']: [] for app in apps}
+
+    async def generate_media_tags_batch(self, media_list: List[Dict]) -> Dict[str, List[str]]:
+        """批量为媒体生成标签
+
+        Args:
+            media_list: 媒体列表，每个元素包含 media_id, media_name, media_type
+
+        Returns:
+            字典，key为media_id，value为标签列表
+        """
+        logger.info(f"开始批量为 {len(media_list)} 个媒体生成标签")
+
+        # 构建批量请求的prompt
+        media_list_str = "\n".join([
+            f"{i+1}. 媒体名称: {media['media_name']}, 类型: {media.get('media_type', '未知')}"
+            for i, media in enumerate(media_list)
+        ])
+
+        prompt = f"""你是一个媒体分析专家。请为以下 {len(media_list)} 个媒体生成标签。
+
+媒体列表:
+{media_list_str}
+
+要求:
+1. 为每个媒体生成3-5个精准的标签
+2. 标签应该描述媒体的内容类型、受众群体、传播特点
+3. 标签要简洁(2-4个中文字)
+4. 必须返回JSON对象格式，key为媒体名称，value为标签数组
+
+输出格式示例:
+{{
+  "爱奇艺": ["视频平台", "长视频", "影视剧", "综艺"],
+  "B站": ["视频社区", "二次元", "年轻人", "UP主"],
+  "微博": ["社交媒体", "资讯", "热点", "明星"],
+  "知乎": ["问答社区", "知识分享", "专业", "深度"],
+  "小红书": ["生活方式", "种草", "女性", "美妆"]
+}}
+
+请严格按照上述JSON格式输出，不要添加任何其他说明文字:"""
+
+        try:
+            response = await self.chat_completion(prompt, max_tokens=4000)
+            original_response = response
+            logger.debug(f"批量媒体打标原始响应: [{original_response[:500]}...]")
+
+            # 移除MiniMax的<think>标签
+            if '<think>' in response:
+                response = response.split('</think>')[-1].strip()
+                logger.debug(f"移除<think>后: [{response[:500]}...]")
+
+            # 提取JSON对象
+            import re
+            json_match = re.search(r'\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}', response, re.DOTALL)
+            if json_match:
+                json_str = json_match.group(0)
+                tags_dict = json.loads(json_str)
+
+                # 将媒体名称映射回media_id
+                result = {}
+                for media in media_list:
+                    media_name = media['media_name']
+                    if media_name in tags_dict:
+                        tags = tags_dict[media_name]
+                        if isinstance(tags, list):
+                            result[media['media_id']] = tags
+                            logger.info(f"✓ 媒体 [{media_name}] 标签: {tags}")
+                        else:
+                            result[media['media_id']] = []
+                            logger.warning(f"✗ 媒体 [{media_name}] 标签格式错误: {tags}")
+                    else:
+                        result[media['media_id']] = []
+                        logger.warning(f"✗ 媒体 [{media_name}] 未在响应中找到")
+
+                logger.info(f"✓ 批量打标完成: 成功 {len([v for v in result.values() if v])}/{len(media_list)}")
+                return result
+            else:
+                logger.error(f"✗ 批量媒体打标未找到JSON对象, 原始响应=[{original_response}], 处理后=[{response}]")
+                return {media['media_id']: [] for media in media_list}
+
+        except json.JSONDecodeError as e:
+            logger.error(f"✗ 批量媒体打标JSON解析失败: {e}, 响应=[{response[:500]}...]", exc_info=True)
+            return {media['media_id']: [] for media in media_list}
+        except Exception as e:
+            logger.error(f"✗ 批量媒体打标异常: {type(e).__name__}: {str(e)}", exc_info=True)
+            return {media['media_id']: [] for media in media_list}
 
     async def generate_app_tags(self, app_name: str, category: str = None) -> List[str]:
         """为APP生成标签"""
-        logger.info(f"开始为APP {app_name} 生成标签")
+        logger.info(f"开始为APP [{app_name}] 生成标签, 分类=[{category}]")
         prompt = f"""你是一个移动应用分析专家。请为以下APP生成3-5个精准的标签。
 
 APP名称: {app_name}
@@ -63,16 +235,14 @@ APP名称: {app_name}
 请直接返回JSON数组,不要其他说明:"""
 
         try:
-            logger.info(f"准备调用chat_completion for {app_name}")
             response = await self.chat_completion(prompt, max_tokens=200)
-            logger.info(f"chat_completion返回,响应长度: {len(response)}")
+            original_response = response
+            logger.debug(f"APP [{app_name}] 原始LLM响应: [{original_response}]")
 
             # 移除MiniMax的<think>标签
             if '<think>' in response:
-                # 提取</think>之后的内容
                 response = response.split('</think>')[-1].strip()
-
-            logger.info(f"处理后的响应: [{response}]")
+                logger.debug(f"APP [{app_name}] 移除<think>后: [{response}]")
 
             # 尝试从响应中提取JSON数组
             import re
@@ -80,18 +250,21 @@ APP名称: {app_name}
             if json_match:
                 json_str = json_match.group(0)
                 tags = json.loads(json_str)
-                logger.info(f"成功解析标签: {tags}")
+                logger.info(f"✓ APP [{app_name}] 成功生成标签: {tags}")
                 return tags if isinstance(tags, list) else []
             else:
-                logger.warning(f"未找到JSON数组: {response}")
+                logger.warning(f"✗ APP [{app_name}] 未找到JSON数组, 原始响应=[{original_response}], 处理后=[{response}]")
                 return []
+        except json.JSONDecodeError as e:
+            logger.error(f"✗ APP [{app_name}] JSON解析失败: {e}, 响应内容=[{response}]", exc_info=True)
+            return []
         except Exception as e:
-            logger.error(f"为APP {app_name} 生成标签失败: {e}", exc_info=True)
+            logger.error(f"✗ APP [{app_name}] 生成标签异常: {type(e).__name__}: {str(e)}", exc_info=True)
             return []
 
     async def generate_media_tags(self, media_name: str, media_type: str = None) -> List[str]:
         """为媒体生成标签"""
-        logger.info(f"开始为媒体 {media_name} 生成标签")
+        logger.info(f"开始为媒体 [{media_name}] 生成标签, 类型=[{media_type}]")
         prompt = f"""你是一个媒体分析专家。请为以下媒体生成3-5个精准的标签。
 
 媒体名称: {media_name}
@@ -105,16 +278,14 @@ APP名称: {app_name}
 请直接返回JSON数组,不要其他说明:"""
 
         try:
-            logger.info(f"准备调用chat_completion for {media_name}")
             response = await self.chat_completion(prompt, max_tokens=200)
-            logger.info(f"chat_completion返回,响应长度: {len(response)}")
+            original_response = response
+            logger.debug(f"媒体 [{media_name}] 原始LLM响应: [{original_response}]")
 
             # 移除MiniMax的<think>标签
             if '<think>' in response:
-                # 提取</think>之后的内容
                 response = response.split('</think>')[-1].strip()
-
-            logger.info(f"处理后的响应: [{response}]")
+                logger.debug(f"媒体 [{media_name}] 移除<think>后: [{response}]")
 
             # 尝试从响应中提取JSON数组
             import re
@@ -122,13 +293,16 @@ APP名称: {app_name}
             if json_match:
                 json_str = json_match.group(0)
                 tags = json.loads(json_str)
-                logger.info(f"成功解析标签: {tags}")
+                logger.info(f"✓ 媒体 [{media_name}] 成功生成标签: {tags}")
                 return tags if isinstance(tags, list) else []
             else:
-                logger.warning(f"未找到JSON数组: {response}")
+                logger.warning(f"✗ 媒体 [{media_name}] 未找到JSON数组, 原始响应=[{original_response}], 处理后=[{response}]")
                 return []
+        except json.JSONDecodeError as e:
+            logger.error(f"✗ 媒体 [{media_name}] JSON解析失败: {e}, 响应内容=[{response}]", exc_info=True)
+            return []
         except Exception as e:
-            logger.error(f"为媒体 {media_name} 生成标签失败: {e}", exc_info=True)
+            logger.error(f"✗ 媒体 [{media_name}] 生成标签异常: {type(e).__name__}: {str(e)}", exc_info=True)
             return []
     
     async def generate_event_graph(

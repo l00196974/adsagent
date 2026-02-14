@@ -166,31 +166,68 @@ class BaseModelingService:
                 cursor.execute("SELECT id, app_id, app_name, category FROM app_tags WHERE llm_generated = 0")
                 apps = cursor.fetchall()
 
-            app_logger.info(f"开始为 {len(apps)} 个APP生成标签")
+            if not apps:
+                app_logger.info("没有需要打标的APP")
+                return
 
-            for app_row in apps:
-                app_id, app_name, category = app_row[1], app_row[2], app_row[3]
+            app_logger.info(f"========== 开始批量生成APP标签: 共 {len(apps)} 个APP ==========")
+
+            # 转换为字典列表
+            app_list = [
+                {
+                    "app_id": row[1],
+                    "app_name": row[2],
+                    "category": row[3]
+                }
+                for row in apps
+            ]
+
+            # 分批处理，每批100个
+            batch_size = 100
+            total_success = 0
+            total_fail = 0
+
+            for i in range(0, len(app_list), batch_size):
+                batch = app_list[i:i + batch_size]
+                batch_num = i // batch_size + 1
+                total_batches = (len(app_list) + batch_size - 1) // batch_size
+
+                app_logger.info(f"处理第 {batch_num}/{total_batches} 批，共 {len(batch)} 个APP")
+
                 try:
-                    # 调用LLM生成标签
-                    tags = await self.llm_client.generate_app_tags(app_name, category)
+                    # 批量调用LLM
+                    tags_dict = await self.llm_client.generate_app_tags_batch(batch)
 
-                    # 更新数据库
+                    # 批量更新数据库
                     with sqlite3.connect(self.db_path) as conn:
                         cursor = conn.cursor()
-                        cursor.execute("""
-                            UPDATE app_tags
-                            SET tags = ?, llm_generated = 1
-                            WHERE app_id = ?
-                        """, (json.dumps(tags, ensure_ascii=False), app_id))
+                        for app in batch:
+                            app_id = app['app_id']
+                            tags = tags_dict.get(app_id, [])
+
+                            cursor.execute("""
+                                UPDATE app_tags
+                                SET tags = ?, llm_generated = 1
+                                WHERE app_id = ?
+                            """, (json.dumps(tags, ensure_ascii=False), app_id))
+
+                            if tags:
+                                total_success += 1
+                            else:
+                                total_fail += 1
+
                         conn.commit()
 
-                    app_logger.info(f"为APP {app_name} 生成标签: {tags}")
-                except Exception as e:
-                    app_logger.error(f"为APP {app_name} 生成标签失败: {e}")
+                    app_logger.info(f"✓ 第 {batch_num} 批完成: 成功 {len([t for t in tags_dict.values() if t])}/{len(batch)}")
 
-            app_logger.info("APP标签生成完成")
+                except Exception as e:
+                    total_fail += len(batch)
+                    app_logger.error(f"✗ 第 {batch_num} 批处理失败: {type(e).__name__}: {str(e)}", exc_info=True)
+
+            app_logger.info(f"========== APP标签生成完成: 成功 {total_success}/{len(app_list)}, 失败 {total_fail}/{len(app_list)} ==========")
+
         except Exception as e:
-            app_logger.error(f"批量生成APP标签失败: {e}", exc_info=True)
+            app_logger.error(f"批量生成APP标签失败: {type(e).__name__}: {str(e)}", exc_info=True)
 
     def query_app_tags(self, limit: int = 100, offset: int = 0) -> Dict:
         """查询APP标签"""
@@ -284,31 +321,68 @@ class BaseModelingService:
                 cursor.execute("SELECT id, media_id, media_name, media_type FROM media_tags WHERE llm_generated = 0")
                 media_list = cursor.fetchall()
 
-            app_logger.info(f"开始为 {len(media_list)} 个媒体生成标签")
+            if not media_list:
+                app_logger.info("没有需要打标的媒体")
+                return
 
-            for media_row in media_list:
-                media_id, media_name, media_type = media_row[1], media_row[2], media_row[3]
+            app_logger.info(f"========== 开始批量生成媒体标签: 共 {len(media_list)} 个媒体 ==========")
+
+            # 转换为字典列表
+            media_dict_list = [
+                {
+                    "media_id": row[1],
+                    "media_name": row[2],
+                    "media_type": row[3]
+                }
+                for row in media_list
+            ]
+
+            # 分批处理，每批100个
+            batch_size = 100
+            total_success = 0
+            total_fail = 0
+
+            for i in range(0, len(media_dict_list), batch_size):
+                batch = media_dict_list[i:i + batch_size]
+                batch_num = i // batch_size + 1
+                total_batches = (len(media_dict_list) + batch_size - 1) // batch_size
+
+                app_logger.info(f"处理第 {batch_num}/{total_batches} 批，共 {len(batch)} 个媒体")
+
                 try:
-                    # 调用LLM生成标签
-                    tags = await self.llm_client.generate_media_tags(media_name, media_type)
+                    # 批量调用LLM
+                    tags_dict = await self.llm_client.generate_media_tags_batch(batch)
 
-                    # 更新数据库
+                    # 批量更新数据库
                     with sqlite3.connect(self.db_path) as conn:
                         cursor = conn.cursor()
-                        cursor.execute("""
-                            UPDATE media_tags
-                            SET tags = ?, llm_generated = 1
-                            WHERE media_id = ?
-                        """, (json.dumps(tags, ensure_ascii=False), media_id))
+                        for media in batch:
+                            media_id = media['media_id']
+                            tags = tags_dict.get(media_id, [])
+
+                            cursor.execute("""
+                                UPDATE media_tags
+                                SET tags = ?, llm_generated = 1
+                                WHERE media_id = ?
+                            """, (json.dumps(tags, ensure_ascii=False), media_id))
+
+                            if tags:
+                                total_success += 1
+                            else:
+                                total_fail += 1
+
                         conn.commit()
 
-                    app_logger.info(f"为媒体 {media_name} 生成标签: {tags}")
-                except Exception as e:
-                    app_logger.error(f"为媒体 {media_name} 生成标签失败: {e}")
+                    app_logger.info(f"✓ 第 {batch_num} 批完成: 成功 {len([t for t in tags_dict.values() if t])}/{len(batch)}")
 
-            app_logger.info("媒体标签生成完成")
+                except Exception as e:
+                    total_fail += len(batch)
+                    app_logger.error(f"✗ 第 {batch_num} 批处理失败: {type(e).__name__}: {str(e)}", exc_info=True)
+
+            app_logger.info(f"========== 媒体标签生成完成: 成功 {total_success}/{len(media_dict_list)}, 失败 {total_fail}/{len(media_dict_list)} ==========")
+
         except Exception as e:
-            app_logger.error(f"批量生成媒体标签失败: {e}", exc_info=True)
+            app_logger.error(f"批量生成媒体标签失败: {type(e).__name__}: {str(e)}", exc_info=True)
 
     def query_media_tags(self, limit: int = 100, offset: int = 0) -> Dict:
         """查询媒体标签"""
