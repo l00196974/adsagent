@@ -1,6 +1,6 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from app.api import graph_routes, sample_routes, qa_routes, csv_import_routes, base_modeling_routes
+from app.api import graph_routes, sample_routes, qa_routes, csv_import_routes, base_modeling_routes, event_extraction_routes
 from app.core.config import settings
 from app.core.exceptions import (
     BusinessException,
@@ -44,6 +44,7 @@ app.include_router(sample_routes.router, prefix="/api/v1/samples")
 app.include_router(qa_routes.router, prefix="/api/v1/qa")
 app.include_router(csv_import_routes.router, prefix="/api/v1/csv")
 app.include_router(base_modeling_routes.router, prefix="/api/v1")
+app.include_router(event_extraction_routes.router, prefix="/api/v1")
 
 @app.get("/health")
 async def health():

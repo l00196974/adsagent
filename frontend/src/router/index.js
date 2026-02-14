@@ -17,6 +17,11 @@ const routes = [
     component: () => import('../views/BaseModeling.vue')
   },
   {
+    path: '/events',
+    name: 'EventExtraction',
+    component: () => import('../views/EventExtraction.vue')
+  },
+  {
     path: '/graph',
     name: 'GraphVisual',
     component: () => import('../views/GraphVisual.vue')

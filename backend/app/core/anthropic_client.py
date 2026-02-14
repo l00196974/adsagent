@@ -304,6 +304,146 @@ APP名称: {app_name}
         except Exception as e:
             logger.error(f"✗ 媒体 [{media_name}] 生成标签异常: {type(e).__name__}: {str(e)}", exc_info=True)
             return []
+
+    async def abstract_events_batch(self, user_behaviors: Dict[str, List[Dict]]) -> Dict[str, List[Dict]]:
+        """批量抽象用户行为为事件
+
+        Args:
+            user_behaviors: {
+                "user_001": [
+                    {"timestamp": "2026-01-01 10:00", "action": "visit_poi", "poi_id": "4s_store_001", "duration": 7200},
+                    {"timestamp": "2026-01-01 14:00", "action": "search", "item_id": "宝马7系价格"},
+                    ...
+                ],
+                "user_002": [...]
+            }
+
+        Returns:
+            {
+                "user_001": [
+                    {
+                        "event_type": "看车",
+                        "timestamp": "2026-01-01 10:00",
+                        "context": {"poi_type": "4S店", "duration": "2小时"}
+                    },
+                    {
+                        "event_type": "关注豪华轿车",
+                        "timestamp": "2026-01-01 14:00",
+                        "context": {"brand": "宝马", "model": "7系"}
+                    }
+                ],
+                "user_002": [...]
+            }
+        """
+        logger.info(f"开始批量抽象 {len(user_behaviors)} 个用户的行为为事件")
+
+        # 构建批量请求的prompt
+        user_behaviors_str = ""
+        for user_id, behaviors in user_behaviors.items():
+            user_behaviors_str += f"\n用户 {user_id}:\n"
+            for behavior in behaviors:
+                timestamp = behavior.get("timestamp", "")
+                action = behavior.get("action", "")
+
+                # 格式化行为描述
+                if action == "visit_poi":
+                    poi_id = behavior.get("poi_id", "")
+                    duration = behavior.get("duration", 0)
+                    duration_hours = duration // 3600 if duration else 0
+                    user_behaviors_str += f"  - {timestamp} 在{poi_id}停留{duration_hours}小时\n"
+                elif action == "search":
+                    query = behavior.get("item_id", "")
+                    user_behaviors_str += f"  - {timestamp} 搜索:{query}\n"
+                elif action == "view":
+                    item = behavior.get("item_id", "")
+                    user_behaviors_str += f"  - {timestamp} 浏览{item}\n"
+                elif action == "use_app":
+                    app = behavior.get("app_id", "")
+                    user_behaviors_str += f"  - {timestamp} 使用{app}\n"
+                else:
+                    user_behaviors_str += f"  - {timestamp} {action}\n"
+
+        prompt = f"""你是一个用户行为分析专家。请将以下用户的原始行为数据抽象为高层次的事件。
+
+用户行为数据:
+{user_behaviors_str}
+
+要求:
+1. 将细粒度的行为抽象为有业务意义的事件
+2. 事件类型要简洁(2-6个中文字)
+3. 保留时间信息
+4. 提取关键上下文信息
+5. 必须返回JSON对象格式
+
+抽象规则示例:
+- "在4S店停留2小时" → "看车"
+- "使用挂号APP" → "医疗需求"
+- "搜索:马尔代夫自由行" → "关注海岛游"
+- "浏览宝马7系+点击配置+对比价格" → "关注豪华轿车"
+
+输出格式示例:
+{{
+  "user_001": [
+    {{
+      "event_type": "看车",
+      "timestamp": "2026-01-01 10:00",
+      "context": {{"poi_type": "4S店", "duration": "2小时"}}
+    }},
+    {{
+      "event_type": "关注豪华轿车",
+      "timestamp": "2026-01-01 14:00",
+      "context": {{"brand": "宝马", "model": "7系"}}
+    }}
+  ],
+  "user_002": [...]
+}}
+
+请严格按照上述JSON格式输出,不要添加任何其他说明文字:"""
+
+        try:
+            response = await self.chat_completion(prompt, max_tokens=4000)
+            original_response = response
+            logger.debug(f"批量事件抽象原始响应: [{original_response[:500]}...]")
+
+            # 移除MiniMax的<think>标签
+            if '<think>' in response:
+                response = response.split('</think>')[-1].strip()
+                logger.debug(f"移除<think>后: [{response[:500]}...]")
+
+            # 提取JSON对象
+            import re
+            json_match = re.search(r'\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}', response, re.DOTALL)
+            if json_match:
+                json_str = json_match.group(0)
+                events_dict = json.loads(json_str)
+
+                # 验证结果格式
+                result = {}
+                for user_id in user_behaviors.keys():
+                    if user_id in events_dict:
+                        events = events_dict[user_id]
+                        if isinstance(events, list):
+                            result[user_id] = events
+                            logger.info(f"✓ 用户 [{user_id}] 抽象了 {len(events)} 个事件")
+                        else:
+                            result[user_id] = []
+                            logger.warning(f"✗ 用户 [{user_id}] 事件格式错误: {events}")
+                    else:
+                        result[user_id] = []
+                        logger.warning(f"✗ 用户 [{user_id}] 未在响应中找到")
+
+                logger.info(f"✓ 批量事件抽象完成: 成功 {len([v for v in result.values() if v])}/{len(user_behaviors)}")
+                return result
+            else:
+                logger.error(f"✗ 批量事件抽象未找到JSON对象, 原始响应=[{original_response}], 处理后=[{response}]")
+                return {user_id: [] for user_id in user_behaviors.keys()}
+
+        except json.JSONDecodeError as e:
+            logger.error(f"✗ 批量事件抽象JSON解析失败: {e}, 响应=[{response[:500]}...]", exc_info=True)
+            return {user_id: [] for user_id in user_behaviors.keys()}
+        except Exception as e:
+            logger.error(f"✗ 批量事件抽象异常: {type(e).__name__}: {str(e)}", exc_info=True)
+            return {user_id: [] for user_id in user_behaviors.keys()}
     
     async def generate_event_graph(
         self,
