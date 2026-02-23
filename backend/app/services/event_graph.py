@@ -1,12 +1,12 @@
 from typing import Dict, List
 from collections import defaultdict
 import math
-from app.core.anthropic_client import AnthropicClient
+from app.core.openai_client import OpenAIClient
 from app.services.sample_manager import SampleManager
 from app.core.logger import app_logger
 
 class EventGraphBuilder:
-    def __init__(self, llm_client: AnthropicClient):
+    def __init__(self, llm_client: OpenAIClient):
         self.llm = llm_client
         self.sample_manager = SampleManager()
     

@@ -1,8 +1,8 @@
 from typing import Dict
-from app.core.anthropic_client import AnthropicClient
+from app.core.openai_client import OpenAIClient
 
 class QAEngine:
-    def __init__(self, llm_client: AnthropicClient = None, kg_data: Dict = None):
+    def __init__(self, llm_client: OpenAIClient = None, kg_data: Dict = None):
         self.llm = llm_client
         self.knowledge_graph = kg_data or {}
         self.event_graph = {}

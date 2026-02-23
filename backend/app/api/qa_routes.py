@@ -3,7 +3,7 @@ from pydantic import BaseModel, Field
 from typing import List, Dict, Optional
 from app.services.qa_engine import QAEngine
 from app.services.event_graph import EventGraphBuilder
-from app.core.anthropic_client import AnthropicClient
+from app.core.openai_client import OpenAIClient
 from app.core.logger import app_logger
 
 router = APIRouter()
@@ -24,7 +24,7 @@ class BuildEventGraphFromCSVRequest(BaseModel):
 def init_services():
     global _llm_client, _qa_engine, _event_graph_builder
     try:
-        _llm_client = AnthropicClient()
+        _llm_client = OpenAIClient()
     except Exception:
         _llm_client = None
     _event_graph_builder = EventGraphBuilder(_llm_client)

@@ -7,7 +7,7 @@ from app.services.knowledge_graph import KnowledgeGraphBuilder
 from app.services.sample_manager import SampleManager
 from app.services.qa_engine import QAEngine
 from app.services.event_graph import EventGraphBuilder
-from app.core.anthropic_client import AnthropicClient
+from app.core.openai_client import OpenAIClient
 from app.core.config import settings
 from app.core.logger import app_logger
 
@@ -45,14 +45,14 @@ def get_sample_manager() -> Generator[SampleManager, None, None]:
 
 # ========== LLM客户端依赖 ==========
 
-def get_llm_client() -> Generator[AnthropicClient, None, None]:
+def get_llm_client() -> Generator[OpenAIClient, None, None]:
     """获取LLM客户端（每个请求独立实例）"""
-    if not settings.anthropic_api_key:
-        app_logger.warning("未配置Anthropic API Key，LLM功能将降级")
+    if not settings.openai_api_key:
+        app_logger.warning("未配置OpenAI API Key，LLM功能将降级")
         yield None
     else:
         try:
-            client = AnthropicClient()
+            client = OpenAIClient()
             yield client
         except Exception as e:
             app_logger.error(f"初始化LLM客户端失败: {e}")
@@ -62,7 +62,7 @@ def get_llm_client() -> Generator[AnthropicClient, None, None]:
 # ========== QA引擎依赖 ==========
 
 def get_qa_engine(
-    llm_client: AnthropicClient = None
+    llm_client: OpenAIClient = None
 ) -> Generator[QAEngine, None, None]:
     """获取QA引擎（每个请求独立实例）"""
     engine = QAEngine(llm_client=llm_client)
@@ -75,7 +75,7 @@ def get_qa_engine(
 # ========== 事理图谱构建器依赖 ==========
 
 def get_event_graph_builder(
-    llm_client: AnthropicClient = None
+    llm_client: OpenAIClient = None
 ) -> Generator[EventGraphBuilder, None, None]:
     """获取事理图谱构建器（每个请求独立实例）"""
     builder = EventGraphBuilder(llm_client=llm_client)

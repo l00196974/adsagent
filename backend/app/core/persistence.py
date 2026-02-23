@@ -203,6 +203,52 @@ class GraphPersistence:
                 )
             """)
 
+            # 事理图谱表（新版本）
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS causal_graphs (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    graph_name TEXT NOT NULL,
+                    analysis_focus TEXT,
+                    source_pattern_ids TEXT,
+                    total_users INTEGER,
+                    total_patterns INTEGER,
+                    graph_data TEXT NOT NULL,
+                    insights TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS causal_graph_nodes (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    graph_id INTEGER NOT NULL,
+                    node_id TEXT NOT NULL,
+                    node_type TEXT NOT NULL,
+                    node_name TEXT NOT NULL,
+                    description TEXT,
+                    properties TEXT,
+                    FOREIGN KEY (graph_id) REFERENCES causal_graphs(id) ON DELETE CASCADE
+                )
+            """)
+
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS causal_graph_edges (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    graph_id INTEGER NOT NULL,
+                    from_node_id TEXT NOT NULL,
+                    to_node_id TEXT NOT NULL,
+                    relation_type TEXT NOT NULL,
+                    relation_desc TEXT,
+                    probability REAL,
+                    confidence REAL,
+                    condition TEXT,
+                    support_count INTEGER,
+                    properties TEXT,
+                    FOREIGN KEY (graph_id) REFERENCES causal_graphs(id) ON DELETE CASCADE
+                )
+            """)
+
             # 创建索引
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_entities_type ON entities(type)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_relations_from ON relations(from_id)")
@@ -210,7 +256,9 @@ class GraphPersistence:
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_relations_type ON relations(type)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_behavior_user ON behavior_data(user_id)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_behavior_timestamp ON behavior_data(timestamp)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_behavior_user_timestamp ON behavior_data(user_id, timestamp)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_extracted_events_user ON extracted_events(user_id)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_extracted_events_timestamp ON extracted_events(timestamp)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_event_sequences_user ON event_sequences(user_id)")
 
             conn.commit()
@@ -399,44 +447,248 @@ class GraphPersistence:
     # ========== 批量操作 ==========
 
     def batch_save_entities(self, entities: List[Dict]) -> int:
-        """批量保存实体"""
+        """批量保存实体（优化版：使用executemany）"""
+        if not entities:
+            return 0
+
         saved_count = 0
         try:
             with sqlite3.connect(self.db_path) as conn:
                 cursor = conn.cursor()
-                for entity in entities:
-                    try:
-                        cursor.execute(
-                            "INSERT OR REPLACE INTO entities (id, type, properties) VALUES (?, ?, ?)",
-                            (entity["id"], entity["type"], json.dumps(entity.get("properties", {}), ensure_ascii=False))
-                        )
-                        saved_count += 1
-                    except Exception as e:
-                        logger.warning(f"保存实体 {entity.get('id')} 失败: {e}")
+
+                # 准备批量数据
+                data = [
+                    (
+                        entity["id"],
+                        entity["type"],
+                        json.dumps(entity.get("properties", {}), ensure_ascii=False)
+                    )
+                    for entity in entities
+                ]
+
+                # 使用executemany批量插入（10-20倍性能提升）
+                cursor.executemany(
+                    "INSERT OR REPLACE INTO entities (id, type, properties) VALUES (?, ?, ?)",
+                    data
+                )
+                saved_count = len(data)
                 conn.commit()
+
         except Exception as e:
             logger.error(f"批量保存实体失败: {e}")
+
         return saved_count
 
     def batch_save_relations(self, relations: List[Dict]) -> int:
-        """批量保存关系"""
+        """批量保存关系（优化版：使用executemany）"""
+        if not relations:
+            return 0
+
         saved_count = 0
         try:
             with sqlite3.connect(self.db_path) as conn:
                 cursor = conn.cursor()
-                for rel in relations:
-                    try:
-                        cursor.execute(
-                            "INSERT INTO relations (from_id, to_id, type, properties) VALUES (?, ?, ?, ?)",
-                            (rel["from"], rel["to"], rel["type"], json.dumps(rel.get("properties", {}), ensure_ascii=False))
-                        )
-                        saved_count += 1
-                    except Exception as e:
-                        logger.warning(f"保存关系失败: {e}")
+
+                # 准备批量数据
+                data = [
+                    (
+                        rel["from"],
+                        rel["to"],
+                        rel["type"],
+                        json.dumps(rel.get("properties", {}), ensure_ascii=False)
+                    )
+                    for rel in relations
+                ]
+
+                # 使用executemany批量插入（10-20倍性能提升）
+                cursor.executemany(
+                    "INSERT INTO relations (from_id, to_id, type, properties) VALUES (?, ?, ?, ?)",
+                    data
+                )
+                saved_count = len(data)
                 conn.commit()
+
         except Exception as e:
             logger.error(f"批量保存关系失败: {e}")
         return saved_count
+
+    # ========== 事理图谱持久化（新版本）==========
+
+    def save_causal_graph(self, graph_name: str, analysis_focus: str, source_pattern_ids: List[int],
+                         total_users: int, total_patterns: int, graph_data: Dict, insights: List[str]) -> int:
+        """保存事理图谱"""
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    """INSERT INTO causal_graphs
+                       (graph_name, analysis_focus, source_pattern_ids, total_users, total_patterns, graph_data, insights)
+                       VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                    (graph_name, analysis_focus, json.dumps(source_pattern_ids),
+                     total_users, total_patterns, json.dumps(graph_data, ensure_ascii=False),
+                     json.dumps(insights, ensure_ascii=False))
+                )
+                graph_id = cursor.lastrowid
+                conn.commit()
+                logger.info(f"事理图谱已保存: {graph_id}")
+                return graph_id
+        except Exception as e:
+            logger.error(f"保存事理图谱失败: {e}")
+            return -1
+
+    def save_causal_graph_nodes(self, graph_id: int, nodes: List[Dict]) -> int:
+        """批量保存事理图谱节点（优化版：使用executemany）"""
+        if not nodes:
+            return 0
+
+        saved_count = 0
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+
+                # 准备批量数据
+                data = [
+                    (
+                        graph_id,
+                        node["id"],
+                        node["type"],
+                        node["name"],
+                        node.get("description", ""),
+                        json.dumps(node.get("properties", {}), ensure_ascii=False)
+                    )
+                    for node in nodes
+                ]
+
+                # 使用executemany批量插入
+                cursor.executemany(
+                    """INSERT INTO causal_graph_nodes
+                       (graph_id, node_id, node_type, node_name, description, properties)
+                       VALUES (?, ?, ?, ?, ?, ?)""",
+                    data
+                )
+                saved_count = len(data)
+                conn.commit()
+
+        except Exception as e:
+            logger.error(f"批量保存节点失败: {e}")
+
+        return saved_count
+
+    def save_causal_graph_edges(self, graph_id: int, edges: List[Dict]) -> int:
+        """批量保存事理图谱边（优化版：使用executemany）"""
+        if not edges:
+            return 0
+
+        saved_count = 0
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+
+                # 准备批量数据
+                data = [
+                    (
+                        graph_id,
+                        edge["from"],
+                        edge["to"],
+                        edge["relation_type"],
+                        edge.get("relation_desc", ""),
+                        edge.get("probability", 0.0),
+                        edge.get("confidence", 0.0),
+                        edge.get("condition", ""),
+                        edge.get("support_count", 0),
+                        json.dumps(edge.get("properties", {}), ensure_ascii=False)
+                    )
+                    for edge in edges
+                ]
+
+                # 使用executemany批量插入
+                cursor.executemany(
+                    """INSERT INTO causal_graph_edges
+                       (graph_id, from_node_id, to_node_id, relation_type, relation_desc,
+                        probability, confidence, condition, support_count, properties)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    data
+                )
+                saved_count = len(data)
+                conn.commit()
+
+        except Exception as e:
+            logger.error(f"批量保存边失败: {e}")
+
+        return saved_count
+
+    def get_causal_graph(self, graph_id: int) -> Optional[Dict]:
+        """获取事理图谱"""
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    """SELECT id, graph_name, analysis_focus, source_pattern_ids, total_users,
+                              total_patterns, graph_data, insights, created_at, updated_at
+                       FROM causal_graphs WHERE id = ?""",
+                    (graph_id,)
+                )
+                row = cursor.fetchone()
+                if not row:
+                    return None
+
+                return {
+                    "id": row[0],
+                    "graph_name": row[1],
+                    "analysis_focus": row[2],
+                    "source_pattern_ids": json.loads(row[3]),
+                    "total_users": row[4],
+                    "total_patterns": row[5],
+                    "graph_data": json.loads(row[6]),
+                    "insights": json.loads(row[7]),
+                    "created_at": row[8],
+                    "updated_at": row[9]
+                }
+        except Exception as e:
+            logger.error(f"获取事理图谱失败: {e}")
+            return None
+
+    def list_causal_graphs(self, limit: int = 20, offset: int = 0) -> List[Dict]:
+        """获取事理图谱列表"""
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    """SELECT id, graph_name, analysis_focus, total_users, total_patterns,
+                              created_at, updated_at
+                       FROM causal_graphs
+                       ORDER BY created_at DESC
+                       LIMIT ? OFFSET ?""",
+                    (limit, offset)
+                )
+                graphs = []
+                for row in cursor.fetchall():
+                    graphs.append({
+                        "id": row[0],
+                        "graph_name": row[1],
+                        "analysis_focus": row[2],
+                        "total_users": row[3],
+                        "total_patterns": row[4],
+                        "created_at": row[5],
+                        "updated_at": row[6]
+                    })
+                return graphs
+        except Exception as e:
+            logger.error(f"获取事理图谱列表失败: {e}")
+            return []
+
+    def delete_causal_graph(self, graph_id: int) -> bool:
+        """删除事理图谱"""
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                cursor.execute("DELETE FROM causal_graphs WHERE id = ?", (graph_id,))
+                conn.commit()
+                logger.info(f"事理图谱已删除: {graph_id}")
+                return True
+        except Exception as e:
+            logger.error(f"删除事理图谱失败: {e}")
+            return False
 
 
 # 全局持久化实例

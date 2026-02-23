@@ -13,6 +13,7 @@
         <el-tab-pane label="行为数据" name="behavior">
           <div class="tab-content">
             <div class="action-bar">
+              <el-button type="success" :icon="Download" @click="downloadBehaviorTemplate">下载模板</el-button>
               <el-upload
                 :action="uploadUrl + '/modeling/behavior/import'"
                 :on-success="handleBehaviorUploadSuccess"
@@ -27,13 +28,8 @@
 
             <el-table :data="behaviorData" style="width: 100%; margin-top: 20px" v-loading="behaviorLoading">
               <el-table-column prop="user_id" label="用户ID" width="120" />
-              <el-table-column prop="action" label="动作" width="100" />
               <el-table-column prop="timestamp" label="时间戳" width="180" />
-              <el-table-column prop="item_id" label="商品ID" width="120" />
-              <el-table-column prop="app_id" label="APP ID" width="120" />
-              <el-table-column prop="media_id" label="媒体ID" width="120" />
-              <el-table-column prop="poi_id" label="POI ID" width="120" />
-              <el-table-column prop="duration" label="时长(秒)" width="100" />
+              <el-table-column prop="behavior_text" label="行为描述" min-width="300" show-overflow-tooltip />
             </el-table>
 
             <el-pagination
@@ -51,6 +47,7 @@
         <el-tab-pane label="APP标签" name="app">
           <div class="tab-content">
             <div class="action-bar">
+              <el-button type="success" :icon="Download" @click="downloadAppTemplate">下载模板</el-button>
               <el-upload
                 :action="uploadUrl + '/modeling/app-tags/import'"
                 :on-success="handleAppUploadSuccess"
@@ -106,6 +103,7 @@
         <el-tab-pane label="媒体标签" name="media">
           <div class="tab-content">
             <div class="action-bar">
+              <el-button type="success" :icon="Download" @click="downloadMediaTemplate">下载模板</el-button>
               <el-upload
                 :action="uploadUrl + '/modeling/media-tags/import'"
                 :on-success="handleMediaUploadSuccess"
@@ -161,6 +159,7 @@
         <el-tab-pane label="用户画像" name="profile">
           <div class="tab-content">
             <div class="action-bar">
+              <el-button type="success" :icon="Download" @click="downloadProfileTemplate">下载模板</el-button>
               <el-upload
                 :action="uploadUrl + '/modeling/profiles/import'"
                 :on-success="handleProfileUploadSuccess"
@@ -175,22 +174,7 @@
 
             <el-table :data="profilesData" style="width: 100%; margin-top: 20px" v-loading="profileLoading">
               <el-table-column prop="user_id" label="用户ID" width="120" />
-              <el-table-column prop="age" label="年龄" width="80" />
-              <el-table-column prop="gender" label="性别" width="80" />
-              <el-table-column prop="city" label="城市" width="120" />
-              <el-table-column prop="occupation" label="职业" width="150" />
-              <el-table-column label="其他属性" min-width="200">
-                <template #default="scope">
-                  <el-tag
-                    v-for="(value, key) in scope.row.properties"
-                    :key="key"
-                    size="small"
-                    style="margin-right: 5px"
-                  >
-                    {{ key }}: {{ value }}
-                  </el-tag>
-                </template>
-              </el-table-column>
+              <el-table-column prop="profile_text" label="用户画像" min-width="400" show-overflow-tooltip />
             </el-table>
 
             <el-pagination
@@ -211,7 +195,7 @@
 <script setup>
 import { ref, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
-import { Upload, Refresh } from '@element-plus/icons-vue'
+import { Upload, Refresh, Download } from '@element-plus/icons-vue'
 import axios from 'axios'
 
 const uploadUrl = '/api/v1'
@@ -364,7 +348,25 @@ const handleProfileUploadSuccess = (response) => {
 
 const handleUploadError = (error) => {
   console.error('上传失败', error)
-  ElMessage.error('上传失败,请检查文件格式')
+  
+  let errorMessage = '上传失败,请检查文件格式'
+  
+  if (error.response) {
+    const response = error.response
+    if (response.data && response.data.detail) {
+      errorMessage = `上传失败: ${response.data.detail}`
+    } else if (response.status === 422) {
+      errorMessage = '文件格式错误，请确保上传CSV文件'
+    } else if (response.status === 500) {
+      errorMessage = '服务器处理失败，请查看后端日志'
+    } else if (response.status === 0) {
+      errorMessage = '无法连接到服务器，请检查后端是否启动'
+    }
+  } else if (error.message) {
+    errorMessage = `上传失败: ${error.message}`
+  }
+  
+  ElMessage.error(errorMessage)
 }
 
 // 刷新数据
@@ -394,6 +396,62 @@ const getStatusText = (status) => {
     failed: '失败'
   }
   return map[status] || status
+}
+
+// 下载模板
+const downloadBehaviorTemplate = () => {
+  const csvContent = `user_id,timestamp,behavior_text
+user_001,2026-01-01 10:00:00,在微信上浏览了BMW 7系的广告，停留了5分钟
+user_001,2026-01-01 10:30:00,在汽车之家APP搜索"豪华轿车"
+user_001,2026-01-02 14:00:00,在4S店停留了2小时，试驾了BMW 7系
+user_002,2026-01-01 11:00:00,在抖音上观看了奔驰S级的视频广告
+user_002,2026-01-01 15:30:00,在懂车帝APP上对比了BMW 7系和奔驰S级
+user_003,2026-01-03 09:00:00,在高德地图上搜索附近的BMW 4S店
+user_003,2026-01-03 10:30:00,在BMW官网配置了一台7系，总价120万`
+  downloadCSV(csvContent, 'behavior_template.csv')
+}
+
+const downloadAppTemplate = () => {
+  const csvContent = `app_id,app_name,category
+app_001,微信,社交
+app_002,抖音,短视频
+app_003,淘宝,电商
+app_004,高德地图,导航
+app_005,美团,生活服务`
+  downloadCSV(csvContent, 'app_template.csv')
+}
+
+const downloadMediaTemplate = () => {
+  const csvContent = `media_id,media_name,media_type
+media_001,今日头条,新闻资讯
+media_002,腾讯视频,视频平台
+media_003,网易云音乐,音乐平台
+media_004,知乎,问答社区
+media_005,小红书,社交电商`
+  downloadCSV(csvContent, 'media_template.csv')
+}
+
+const downloadProfileTemplate = () => {
+  const csvContent = `user_id,profile_text
+user_001,28岁男性，北京工程师，年收入50万，本科学历，喜欢高尔夫和科技产品，关注BMW和奔驰
+user_002,35岁女性，上海设计师，年收入30万，硕士学历，喜欢艺术和旅游，偏好奥迪和沃尔沃
+user_003,42岁男性，深圳企业高管，年收入100万+，本科学历，经常出差，关注豪华商务车型
+user_004,25岁女性，广州在读研究生，无固定收入，喜欢时尚和音乐，关注入门级豪华车
+user_005,38岁男性，杭州创业者，年收入80万，硕士学历，科技爱好者，关注新能源豪华车`
+  downloadCSV(csvContent, 'profile_template.csv')
+}
+
+const downloadCSV = (content, filename) => {
+  const blob = new Blob(['\ufeff' + content], { type: 'text/csv;charset=utf-8;' })
+  const link = document.createElement('a')
+  const url = URL.createObjectURL(blob)
+  link.setAttribute('href', url)
+  link.setAttribute('download', filename)
+  link.style.visibility = 'hidden'
+  document.body.appendChild(link)
+  link.click()
+  document.body.removeChild(link)
+  ElMessage.success(`模板 ${filename} 下载成功`)
 }
 
 onMounted(() => {

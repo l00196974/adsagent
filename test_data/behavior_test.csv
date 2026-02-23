@@ -1,0 +1,6 @@
+user_id,action,timestamp,item_id,app_id,media_id,poi_id,duration
+U000001,click,2026-02-20 10:00:00,item_001,app_001,media_001,poi_001,30
+U000001,view,2026-02-20 10:05:00,item_002,app_002,media_002,poi_002,60
+U000002,click,2026-02-20 11:00:00,item_003,app_001,media_001,poi_003,45
+U000002,purchase,2026-02-20 11:10:00,item_004,app_003,media_002,poi_001,120
+U000003,view,2026-02-20 12:00:00,item_001,app_002,media_003,poi_002,90

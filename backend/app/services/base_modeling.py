@@ -8,7 +8,7 @@ from typing import Dict, List, Optional
 from pathlib import Path
 from app.core.logger import app_logger
 from app.core.persistence import persistence
-from app.core.anthropic_client import AnthropicClient
+from app.core.openai_client import OpenAIClient
 
 
 class BaseModelingService:
@@ -16,12 +16,12 @@ class BaseModelingService:
 
     def __init__(self):
         self.db_path = Path("data/graph.db")
-        self.llm_client = AnthropicClient()
+        self.llm_client = OpenAIClient()
 
     # ========== 行为数据管理 ==========
 
     def import_behavior_data(self, behaviors: List[Dict]) -> Dict:
-        """导入行为数据"""
+        """导入行为数据（非结构化格式）"""
         try:
             saved_count = 0
             with sqlite3.connect(self.db_path) as conn:
@@ -29,18 +29,13 @@ class BaseModelingService:
                 for behavior in behaviors:
                     cursor.execute("""
                         INSERT INTO behavior_data
-                        (user_id, action, timestamp, item_id, app_id, media_id, poi_id, duration, properties)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        (user_id, timestamp, behavior_text, action)
+                        VALUES (?, ?, ?, ?)
                     """, (
                         behavior.get("user_id"),
-                        behavior.get("action"),
                         behavior.get("timestamp"),
-                        behavior.get("item_id"),
-                        behavior.get("app_id"),
-                        behavior.get("media_id"),
-                        behavior.get("poi_id"),
-                        behavior.get("duration"),
-                        json.dumps(behavior.get("properties", {}), ensure_ascii=False)
+                        behavior.get("behavior_text"),
+                        "unstructured"
                     ))
                     saved_count += 1
                 conn.commit()
@@ -58,7 +53,7 @@ class BaseModelingService:
             }
 
     def query_behavior_data(self, user_id: Optional[str] = None, limit: int = 100, offset: int = 0) -> Dict:
-        """查询行为数据"""
+        """查询行为数据（非结构化格式）"""
         try:
             with sqlite3.connect(self.db_path) as conn:
                 cursor = conn.cursor()
@@ -69,7 +64,7 @@ class BaseModelingService:
                     total = cursor.fetchone()[0]
 
                     cursor.execute("""
-                        SELECT id, user_id, action, timestamp, item_id, app_id, media_id, poi_id, duration, properties
+                        SELECT id, user_id, timestamp, behavior_text
                         FROM behavior_data
                         WHERE user_id = ?
                         ORDER BY timestamp DESC
@@ -80,7 +75,7 @@ class BaseModelingService:
                     total = cursor.fetchone()[0]
 
                     cursor.execute("""
-                        SELECT id, user_id, action, timestamp, item_id, app_id, media_id, poi_id, duration, properties
+                        SELECT id, user_id, timestamp, behavior_text
                         FROM behavior_data
                         ORDER BY timestamp DESC
                         LIMIT ? OFFSET ?
@@ -91,14 +86,8 @@ class BaseModelingService:
                     items.append({
                         "id": row[0],
                         "user_id": row[1],
-                        "action": row[2],
-                        "timestamp": row[3],
-                        "item_id": row[4],
-                        "app_id": row[5],
-                        "media_id": row[6],
-                        "poi_id": row[7],
-                        "duration": row[8],
-                        "properties": json.loads(row[9]) if row[9] else {}
+                        "timestamp": row[2],
+                        "behavior_text": row[3]
                     })
 
                 return {
@@ -107,6 +96,16 @@ class BaseModelingService:
                     "limit": limit,
                     "offset": offset
                 }
+        except Exception as e:
+            app_logger.error(f"查询行为数据失败: {e}", exc_info=True)
+            return {
+                "items": [],
+                "total": 0,
+                "limit": limit,
+                "offset": offset
+            }
+
+    # ========== APP标签管理 ==========
         except Exception as e:
             app_logger.error(f"查询行为数据失败: {e}", exc_info=True)
             return {
@@ -431,7 +430,7 @@ class BaseModelingService:
     # ========== 用户画像管理 ==========
 
     def import_user_profiles(self, profiles: List[Dict]) -> Dict:
-        """导入用户画像"""
+        """导入用户画像（非结构化格式）"""
         try:
             saved_count = 0
             with sqlite3.connect(self.db_path) as conn:
@@ -439,15 +438,11 @@ class BaseModelingService:
                 for profile in profiles:
                     cursor.execute("""
                         INSERT OR REPLACE INTO user_profiles
-                        (user_id, age, gender, city, occupation, properties)
-                        VALUES (?, ?, ?, ?, ?, ?)
+                        (user_id, profile_text)
+                        VALUES (?, ?)
                     """, (
                         profile.get("user_id"),
-                        profile.get("age"),
-                        profile.get("gender"),
-                        profile.get("city"),
-                        profile.get("occupation"),
-                        json.dumps(profile.get("properties", {}), ensure_ascii=False)
+                        profile.get("profile_text")
                     ))
                     saved_count += 1
                 conn.commit()
@@ -464,34 +459,49 @@ class BaseModelingService:
                 "error": str(e)
             }
 
-    def query_user_profiles(self, limit: int = 100, offset: int = 0) -> Dict:
-        """查询用户画像"""
+    def query_user_profiles(self, user_id: Optional[str] = None, limit: int = 100, offset: int = 0) -> Dict:
+        """查询用户画像（非结构化格式）
+
+        Args:
+            user_id: 可选，指定用户ID则只查询该用户
+            limit: 返回数量限制
+            offset: 偏移量
+        """
         try:
             with sqlite3.connect(self.db_path) as conn:
                 cursor = conn.cursor()
 
-                # 先查询总数
-                cursor.execute("SELECT COUNT(*) FROM user_profiles")
-                total = cursor.fetchone()[0]
+                if user_id:
+                    # 查询指定用户
+                    cursor.execute("SELECT COUNT(*) FROM user_profiles WHERE user_id = ?", (user_id,))
+                    total = cursor.fetchone()[0]
 
-                cursor.execute("""
-                    SELECT id, user_id, age, gender, city, occupation, properties, created_at
-                    FROM user_profiles
-                    ORDER BY created_at DESC
-                    LIMIT ? OFFSET ?
-                """, (limit, offset))
+                    cursor.execute("""
+                        SELECT id, user_id, profile_text, created_at
+                        FROM user_profiles
+                        WHERE user_id = ?
+                        ORDER BY created_at DESC
+                        LIMIT ? OFFSET ?
+                    """, (user_id, limit, offset))
+                else:
+                    # 查询所有用户
+                    cursor.execute("SELECT COUNT(*) FROM user_profiles")
+                    total = cursor.fetchone()[0]
+
+                    cursor.execute("""
+                        SELECT id, user_id, profile_text, created_at
+                        FROM user_profiles
+                        ORDER BY created_at DESC
+                        LIMIT ? OFFSET ?
+                    """, (limit, offset))
 
                 items = []
                 for row in cursor.fetchall():
                     items.append({
                         "id": row[0],
                         "user_id": row[1],
-                        "age": row[2],
-                        "gender": row[3],
-                        "city": row[4],
-                        "occupation": row[5],
-                        "properties": json.loads(row[6]) if row[6] else {},
-                        "created_at": row[7]
+                        "profile_text": row[2],
+                        "created_at": row[3]
                     })
 
                 return {

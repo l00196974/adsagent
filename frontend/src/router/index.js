@@ -2,14 +2,8 @@ import { createRouter, createWebHistory } from 'vue-router'
 
 const routes = [
   {
-    path: '/import',
-    name: 'DataImport',
-    component: () => import('../views/DataImport.vue')
-  },
-  {
     path: '/',
-    name: 'Dashboard',
-    component: () => import('../views/Dashboard.vue')
+    redirect: '/modeling'
   },
   {
     path: '/modeling',
@@ -22,9 +16,19 @@ const routes = [
     component: () => import('../views/EventExtraction.vue')
   },
   {
-    path: '/graph',
-    name: 'GraphVisual',
-    component: () => import('../views/GraphVisual.vue')
+    path: '/mining',
+    name: 'SequenceMining',
+    component: () => import('../views/SequenceMining.vue')
+  },
+  {
+    path: '/causal-graph/generate',
+    name: 'CausalGraphGeneration',
+    component: () => import('../views/CausalGraphGeneration.vue')
+  },
+  {
+    path: '/causal-graph/view/:graphId?',
+    name: 'CausalGraphView',
+    component: () => import('../views/CausalGraphView.vue')
   },
   {
     path: '/qa',

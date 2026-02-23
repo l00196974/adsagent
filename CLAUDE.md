@@ -144,6 +144,21 @@ Constructs knowledge graphs from user behavior data.
 - `_extract_batch(users)`: Batch process users into entities/relations
 - `get_progress()`: Returns current build progress
 
+### EventExtractor ([backend/app/services/event_extraction.py](backend/app/services/event_extraction.py))
+
+Extracts high-level events from user behavior sequences using LLM.
+
+**Key Methods**:
+- `extract_events_for_user(user_id)`: Extract events for single user
+- `extract_events_batch(user_ids)`: Batch process multiple users (20 users/batch)
+- `_process_single_batch()`: Internal batch processing with parallel execution
+
+**Database Tables**:
+- `extracted_events`: Stores extracted events (event_id, user_id, event_type, timestamp, context)
+- `event_sequences`: Tracks extraction status and sequences per user
+
+**Performance Pattern**: Uses batch processing (20 users/batch) with parallel execution to handle large datasets efficiently.
+
 ### EventGraphBuilder ([backend/app/services/event_graph.py](backend/app/services/event_graph.py))
 
 Generates causal event graphs using LLM analysis.
@@ -168,6 +183,41 @@ Natural language question answering over knowledge graphs.
 - `segment_analysis`: Analyze user segments
 
 **Fallback Behavior**: Returns mock answers when LLM unavailable (graceful degradation).
+
+### LLM Integration Pattern ([backend/app/core/openai_client.py](backend/app/core/openai_client.py))
+
+**CRITICAL**: The system uses a unified LLM client that supports multiple providers (OpenAI, MiniMax, etc.).
+
+**Key Methods**:
+- `chat_completion(prompt, max_tokens, stream)`: Unified LLM call interface
+- `abstract_events_batch(user_behaviors, user_profiles)`: Batch event extraction from behaviors
+- `_stream_chat()`: Internal streaming implementation
+
+**Output Format Pattern**:
+- **Text-based format preferred over JSON**: Use pipe-delimited text (`user_id|event_type|timestamp|context`) instead of JSON for LLM outputs
+- **Reason**: JSON parsing is fragile with LLM responses (incomplete JSON, formatting errors, token limits)
+- **Example**:
+  ```
+  user_001|看车|2026-01-15 10:00|4S店,宝马,停留2小时
+  user_001|浏览车型|2026-01-15 12:30|汽车之家,宝马7系,奔驰S级
+  ```
+
+**Timeout Configuration**:
+- Batch operations: 300s (5 minutes)
+- Large outputs (>8000 tokens): 300s
+- Medium outputs (>2000 tokens): 180s
+- Small outputs: 60s
+
+**Response Handling**:
+- Always remove `<think>` tags from MiniMax responses
+- Remove markdown code blocks (```text, ```json)
+- Parse line-by-line for text format
+- Return both parsed events AND raw LLM response for debugging
+
+**Frontend Integration**:
+- Frontend timeout must be >= backend timeout (use 180s for single user extraction)
+- Display LLM raw responses in UI for transparency
+- Use global LLM log panel ([frontend/src/stores/llmLog.js](frontend/src/stores/llmLog.js)) for real-time feedback
 
 ## Error Handling & Logging
 
@@ -282,12 +332,24 @@ Environment variables (set in `.env`):
 
 Base URL: `/api/v1` (proxied to backend via Vite config)
 
+**Global Timeout**: 30 seconds (line 18) - **IMPORTANT**: Individual API calls requiring longer execution must override this
+
 **Key endpoints**:
 - `buildKnowledgeGraph(userCount)`: POST `/graphs/knowledge/build`
 - `queryKnowledgeGraph(params)`: GET `/graphs/knowledge/query`
 - `generateSamples(config)`: POST `/samples/generate`
 - `generateEventGraph()`: POST `/qa/event-graph/generate`
 - `queryQA(question)`: POST `/qa/query`
+- `extractEventsForUser(userId)`: POST `/events/extract/{userId}` (timeout: 180s)
+
+**Timeout Override Pattern**:
+```javascript
+// Correct - override timeout for long-running operations
+axios.post(url, data, { timeout: 180000 })
+
+// Wrong - uses global 30s timeout
+axios.post(url, data)
+```
 
 ## Data Persistence
 
@@ -350,6 +412,9 @@ The system is designed for future enhancements:
 3. **Don't skip input validation** - All user input must be validated via Pydantic
 4. **Don't return raw exceptions to clients** - Use unified exception handlers
 5. **Don't assume database path** - Check working directory when debugging persistence issues
+6. **Don't use JSON for LLM outputs** - Prefer text-based formats (pipe-delimited) to avoid parsing failures
+7. **Don't use default axios timeout for LLM calls** - Frontend must set explicit timeout (180s+) for event extraction
+8. **Don't modify LLM client without testing** - Python caches .pyc files; clear `__pycache__` after changes
 
 ## Verification
 
@@ -364,11 +429,43 @@ curl -X POST http://localhost:8000/api/v1/graphs/knowledge/build \
   -H "Content-Type: application/json" \
   -d '{"user_count": 100}'
 
-# 3. Check logs
+# 3. Test event extraction (should complete in ~60-90s)
+curl -X POST http://localhost:8000/api/v1/events/extract/user_0001 \
+  -H "Content-Type: application/json"
+
+# 4. Check logs
 tail -f backend/logs/adsagent.log
 
-# 4. Verify persistence
+# 5. Verify persistence
 python -c "import sqlite3; conn = sqlite3.connect('data/graph.db'); \
   cursor = conn.cursor(); cursor.execute('SELECT COUNT(*) FROM entities'); \
   print(f'Entities: {cursor.fetchone()[0]}'); conn.close()"
+
+# 6. Clear Python cache after code changes
+find backend -name "*.pyc" -delete
+find backend -name "__pycache__" -type d -exec rm -rf {} +
 ```
+
+## Debugging LLM Integration Issues
+
+**Common Issues**:
+
+1. **"LLM返回空结果" (LLM returns empty result)**
+   - Check logs for actual LLM response length
+   - Verify `<think>` tag removal is working
+   - Ensure text parsing finds pipe-delimited lines
+   - Check if `max_tokens` is sufficient (use 8000 for batch operations)
+
+2. **Frontend timeout (30s exceeded)**
+   - Verify API call uses explicit timeout override
+   - Check backend logs to see if LLM call completed
+   - Ensure frontend displays LLM response for debugging
+
+3. **AttributeError in openai_client.py**
+   - Class uses `self.primary_model` not `self.model`
+   - Clear `__pycache__` and restart backend
+
+4. **JSON parsing failures**
+   - Switch to text-based format (pipe-delimited)
+   - LLM often returns incomplete JSON due to token limits
+   - Text format is more robust and easier to parse

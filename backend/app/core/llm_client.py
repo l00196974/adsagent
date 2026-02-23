@@ -3,7 +3,7 @@ LLM客户端 - 用于关系识别和商品ID映射
 """
 import json
 from typing import List, Dict, Optional
-from app.core.anthropic_client import AnthropicClient
+from app.core.openai_client import OpenAIClient
 from app.core.logger import app_logger
 
 
@@ -11,7 +11,7 @@ class LLMRelationIdentifier:
     """LLM关系识别器 - 负责识别复杂关系并映射商品ID"""
 
     def __init__(self):
-        self.llm_client = AnthropicClient()
+        self.llm_client = OpenAIClient()
 
     def identify_relations_batch(
         self,

@@ -61,16 +61,28 @@ async def import_behavior_data(file: UploadFile = File(...)):
     try:
         app_logger.info(f"开始导入行为数据: {file.filename}")
 
-        # 读取CSV
-        content = await file.read()
-        df = pd.read_csv(io.BytesIO(content))
+        if not file.filename.endswith('.csv'):
+            raise HTTPException(status_code=400, detail="文件格式错误，请上传CSV文件")
 
-        app_logger.info(f"成功读取CSV,共 {len(df)} 条记录")
+        try:
+            content = await file.read()
+            df = pd.read_csv(io.BytesIO(content))
+        except Exception as e:
+            app_logger.error(f"CSV文件解析失败: {e}", exc_info=True)
+            raise HTTPException(status_code=400, detail=f"CSV文件解析失败: {str(e)}")
 
-        # 转换为字典列表
+        app_logger.info(f"成功读取CSV,共 {len(df)} 条记录, 列: {list(df.columns)}")
+
+        required_columns = ['user_id', 'action', 'timestamp']
+        missing_columns = [col for col in required_columns if col not in df.columns]
+        if missing_columns:
+            raise HTTPException(
+                status_code=400, 
+                detail=f"CSV文件缺少必需列: {', '.join(missing_columns)}。当前列: {', '.join(df.columns)}"
+            )
+
         behaviors = df.to_dict('records')
 
-        # 调用服务层导入
         result = modeling_service.import_behavior_data(behaviors)
 
         if result["success"]:
@@ -85,6 +97,8 @@ async def import_behavior_data(file: UploadFile = File(...)):
         else:
             raise HTTPException(status_code=500, detail=result["error"])
 
+    except HTTPException:
+        raise
     except Exception as e:
         app_logger.error(f"导入行为数据失败: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"导入失败: {str(e)}")
