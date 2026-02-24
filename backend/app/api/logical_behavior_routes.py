@@ -102,3 +102,57 @@ async def query_logical_behaviors(
     except Exception as e:
         app_logger.error(f"查询逻辑行为失败: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"查询失败: {str(e)}")
+
+
+@router.get("/sequences")
+async def list_logical_behavior_sequences(
+    limit: int = 20,
+    offset: int = 0,
+    generator: LogicalBehaviorGenerator = Depends(get_logical_behavior_generator)
+):
+    """列出所有用户的逻辑行为序列状态"""
+    try:
+        import sqlite3
+        from pathlib import Path
+
+        db_path = Path("data/graph.db")
+        with sqlite3.connect(db_path) as conn:
+            cursor = conn.cursor()
+
+            # 查询序列状态
+            cursor.execute(
+                """SELECT user_id, status, behavior_count, error_message, updated_at
+                   FROM logical_behavior_sequences
+                   ORDER BY updated_at DESC
+                   LIMIT ? OFFSET ?""",
+                (limit, offset)
+            )
+
+            sequences = []
+            for row in cursor.fetchall():
+                sequences.append({
+                    "user_id": row[0],
+                    "status": row[1],
+                    "behavior_count": row[2],
+                    "error_message": row[3],
+                    "updated_at": row[4]
+                })
+
+            # 查询总数
+            cursor.execute("SELECT COUNT(*) FROM logical_behavior_sequences")
+            total = cursor.fetchone()[0]
+
+            return {
+                "code": 200,
+                "message": "查询成功",
+                "data": {
+                    "sequences": sequences,
+                    "total": total,
+                    "limit": limit,
+                    "offset": offset
+                }
+            }
+
+    except Exception as e:
+        app_logger.error(f"查询序列列表失败: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"查询失败: {str(e)}")

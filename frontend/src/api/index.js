@@ -173,7 +173,7 @@ export const getUserDetail = (userId) => {
 
 // 获取事件统计（用于序列挖掘页面）
 export const getEventStats = () => {
-  return axios.get(`${BASE_URL}/sequence-mining/event-types`)
+  return axios.get(`${BASE_URL}/mining/event-types`)
     .then(r => r.data)
 }
 
