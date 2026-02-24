@@ -590,7 +590,6 @@ onMounted(async () => {
       extractProgress.value = response.data
       // 开始轮询
       startProgressPolling()
-      console.log('检测到正在运行的批量抽象任务，已恢复进度跟踪')
     }
   } catch (error) {
     console.error('检查任务状态失败:', error)
