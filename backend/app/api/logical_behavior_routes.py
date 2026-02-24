@@ -315,15 +315,6 @@ async def get_user_detail(
                     "duration": row[7],
                     "properties": props
                 })
-                    "action": row[1],
-                    "timestamp": row[2],
-                    "item_id": row[3],
-                    "app_id": row[4],
-                    "media_id": row[5],
-                    "poi_id": row[6],
-                    "duration": row[7],
-                    "properties": props
-                })
 
             # 4. 获取逻辑行为
             cursor.execute(
