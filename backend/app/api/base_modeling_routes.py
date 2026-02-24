@@ -122,24 +122,6 @@ async def list_behavior_data(
         raise HTTPException(status_code=500, detail=f"查询失败: {str(e)}")
 
 
-@router.post("/behavior/add")
-async def add_behavior_data(item: BehaviorDataItem):
-    """页面添加单条行为数据"""
-    try:
-        app_logger.info(f"添加行为数据: user_id={item.user_id}, action={item.action}")
-
-        # TODO: 实现添加逻辑
-
-        return {
-            "code": 0,
-            "message": "成功添加行为数据",
-            "data": item.dict()
-        }
-    except Exception as e:
-        app_logger.error(f"添加行为数据失败: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"添加失败: {str(e)}")
-
-
 # ========== APP标签接口 ==========
 
 @router.post("/app-tags/import")
