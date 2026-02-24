@@ -110,7 +110,7 @@ async def list_logical_behavior_sequences(
     offset: int = 0,
     generator: LogicalBehaviorGenerator = Depends(get_logical_behavior_generator)
 ):
-    """列出所有用户的逻辑行为序列状态"""
+    """列出所有用户的逻辑行为序列状态（包括未生成的用户）"""
     try:
         import sqlite3
         from pathlib import Path
@@ -119,27 +119,45 @@ async def list_logical_behavior_sequences(
         with sqlite3.connect(db_path) as conn:
             cursor = conn.cursor()
 
-            # 查询序列状态
+            # 查询所有用户，LEFT JOIN逻辑行为序列状态
+            # 按照：已生成(success) > 失败(failed) > 未生成(pending/NULL) 排序
             cursor.execute(
-                """SELECT user_id, status, behavior_count, error_message, updated_at
-                   FROM logical_behavior_sequences
-                   ORDER BY updated_at DESC
+                """SELECT
+                       up.user_id,
+                       COALESCE(lbs.status, 'pending') as status,
+                       COALESCE(lbs.behavior_count, 0) as behavior_count,
+                       lbs.error_message,
+                       lbs.updated_at
+                   FROM user_profiles up
+                   LEFT JOIN logical_behavior_sequences lbs ON up.user_id = lbs.user_id
+                   ORDER BY
+                       CASE
+                           WHEN lbs.status = 'success' THEN 1
+                           WHEN lbs.status = 'failed' THEN 2
+                           WHEN lbs.status = 'processing' THEN 3
+                           ELSE 4
+                       END,
+                       lbs.updated_at DESC,
+                       up.user_id ASC
                    LIMIT ? OFFSET ?""",
                 (limit, offset)
             )
 
             sequences = []
             for row in cursor.fetchall():
+                behavior_count = row[2]
                 sequences.append({
                     "user_id": row[0],
                     "status": row[1],
-                    "behavior_count": row[2],
+                    "behavior_count": behavior_count,
+                    "has_events": behavior_count > 0,  # 前端需要
+                    "event_count": behavior_count,      # 前端需要
                     "error_message": row[3],
                     "updated_at": row[4]
                 })
 
-            # 查询总数
-            cursor.execute("SELECT COUNT(*) FROM logical_behavior_sequences")
+            # 查询总用户数
+            cursor.execute("SELECT COUNT(*) FROM user_profiles")
             total = cursor.fetchone()[0]
 
             return {
