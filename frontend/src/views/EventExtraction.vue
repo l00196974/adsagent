@@ -310,7 +310,7 @@
 <script setup>
 import { ref, reactive, onMounted, onBeforeUnmount } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { getUserDetail, startBatchExtract, getExtractProgress, startBatchExtractStream, extractEventsForUserStream } from '../api/index.js'
+import { getUserDetail, startBatchExtract, getExtractProgress, startBatchExtractStream, extractEventsForUser } from '../api/index.js'
 import axios from 'axios'
 import { startLLMLog, appendLLMLog, completeLLMLog, errorLLMLog } from '../stores/llmLog'
 
@@ -511,36 +511,41 @@ const handleSingleExtract = async (userId) => {
     // 启动LLM日志记录
     startLLMLog(`逻辑行为生成 - ${userId}`)
     appendLLMLog(`正在为用户 ${userId} 生成逻辑行为...\n`)
-    appendLLMLog(`\n--- LLM实时响应 ---\n`)
 
-    // 使用流式API
-    await extractEventsForUserStream(userId, {
-      onProgress: (message) => {
-        appendLLMLog(`[进度] ${message}\n`)
-      },
-      onLLMChunk: (chunk) => {
-        // 实时显示LLM返回的每个chunk
-        appendLLMLog(chunk)
-      },
-      onDone: (data) => {
-        appendLLMLog(`\n--- 响应结束 ---\n`)
-        appendLLMLog(`\n✓ 事件抽象完成\n`)
-        completeLLMLog()
-        ElMessage.success(`用户 [${userId}] 事件抽象完成`)
-        loadData()
-      },
-      onError: (error) => {
-        appendLLMLog(`\n✗ 抽象失败: ${error}\n`)
-        errorLLMLog(error)
-        ElMessage.error(`用户 [${userId}] 事件抽象失败: ${error}`)
+    // 调用单用户生成接口（非流式）
+    const response = await extractEventsForUser(userId)
+
+    if (response.code === 200) {
+      const result = response.data
+      appendLLMLog(`\n✓ 逻辑行为生成完成\n`)
+      appendLLMLog(`- 用户ID: ${result.user_id}\n`)
+      appendLLMLog(`- 原始行为数: ${result.raw_behavior_count}\n`)
+      appendLLMLog(`- 逻辑行为数: ${result.logical_behavior_count}\n`)
+
+      // 显示部分逻辑行为示例
+      if (result.logical_behaviors && result.logical_behaviors.length > 0) {
+        appendLLMLog(`\n--- 逻辑行为示例 ---\n`)
+        result.logical_behaviors.slice(0, 3).forEach((lb, idx) => {
+          appendLLMLog(`${idx + 1}. ${lb.action}\n`)
+          appendLLMLog(`   本体: ${lb.agent}\n`)
+          appendLLMLog(`   环境: ${lb.scene}\n`)
+          appendLLMLog(`   客体: ${lb.object}\n`)
+          appendLLMLog(`   时间: ${lb.start_time}\n\n`)
+        })
       }
-    })
+
+      completeLLMLog()
+      ElMessage.success(`用户 [${userId}] 逻辑行为生成完成`)
+      loadData()
+    } else {
+      throw new Error(response.message || '生成失败')
+    }
 
   } catch (error) {
-    console.error('单用户事件抽象失败:', error)
-    appendLLMLog(`\n✗ 抽象异常: ${error.message}\n`)
+    console.error('单用户逻辑行为生成失败:', error)
+    appendLLMLog(`\n✗ 生成异常: ${error.message}\n`)
     errorLLMLog(error.message)
-    ElMessage.error(`用户 [${userId}] 事件抽象失败`)
+    ElMessage.error(`用户 [${userId}] 逻辑行为生成失败`)
   } finally {
     extractingUsers[userId] = false
   }
