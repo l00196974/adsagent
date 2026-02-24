@@ -149,10 +149,10 @@
       <el-table :data="tableData" style="width: 100%" v-loading="loading">
         <el-table-column prop="user_id" label="用户ID" width="150" />
 
-        <el-table-column label="行为序列" width="200">
+        <el-table-column label="原始行为序列" width="200">
           <template #default="scope">
             <el-link type="primary" @click="showSequenceDetail(scope.row)">
-              {{ scope.row.behavior_count }} 条
+              {{ scope.row.raw_behavior_count }} 条
             </el-link>
           </template>
         </el-table-column>
@@ -247,20 +247,22 @@
         <el-empty v-else description="暂无用户画像数据" :image-size="80" />
 
         <!-- 原始行为序列 -->
-        <el-divider content-position="left">原始行为序列</el-divider>
-        <el-scrollbar max-height="300px">
+        <el-divider content-position="left">原始行为序列 ({{ userBehaviors?.length || 0 }} 条)</el-divider>
+        <el-scrollbar max-height="400px">
           <div v-if="userBehaviors && userBehaviors.length > 0" class="behavior-list">
             <div v-for="(behavior, index) in userBehaviors" :key="index" class="behavior-item">
-              <span class="behavior-time">{{ formatTimestamp(behavior.timestamp) }}</span>
-              <span class="behavior-detail">{{ behavior.behavior_text }}</span>
+              <div class="behavior-header">
+                <span class="behavior-index">#{{ index + 1 }}</span>
+                <span class="behavior-time">{{ formatTimestamp(behavior.timestamp) }}</span>
+                <el-tag size="small" type="info">{{ behavior.action_desc }}</el-tag>
+              </div>
+              <div class="behavior-content">
+                <span class="behavior-description">{{ behavior.description }}</span>
+              </div>
+              <div class="behavior-meta" v-if="behavior.duration">
+                <span class="meta-item">时长: {{ behavior.duration }}秒</span>
+              </div>
             </div>
-          </div>
-          <div v-else-if="selectedUser.behavior_sequence && selectedUser.behavior_sequence.length > 0">
-            <ol>
-              <li v-for="(behavior, index) in selectedUser.behavior_sequence" :key="index">
-                {{ behavior }}
-              </li>
-            </ol>
           </div>
           <el-empty v-else description="暂无行为数据" :image-size="80" />
         </el-scrollbar>
@@ -706,13 +708,25 @@ onBeforeUnmount(() => {
 }
 
 .behavior-item {
-  display: flex;
-  align-items: center;
-  padding: 8px 12px;
-  margin-bottom: 8px;
+  padding: 12px;
+  margin-bottom: 10px;
   background: #f5f7fa;
   border-radius: 4px;
+  border-left: 3px solid #409eff;
+}
+
+.behavior-header {
+  display: flex;
+  align-items: center;
   gap: 12px;
+  margin-bottom: 8px;
+}
+
+.behavior-index {
+  color: #909399;
+  font-size: 12px;
+  font-weight: bold;
+  min-width: 30px;
 }
 
 .behavior-time {
@@ -721,11 +735,26 @@ onBeforeUnmount(() => {
   min-width: 160px;
 }
 
-.behavior-detail {
-  color: #606266;
-  font-size: 13px;
+.behavior-content {
+  margin-left: 42px;
+  margin-bottom: 6px;
+}
+
+.behavior-description {
+  color: #303133;
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.behavior-meta {
+  margin-left: 42px;
   display: flex;
-  gap: 16px;
+  gap: 12px;
+}
+
+.meta-item {
+  color: #909399;
+  font-size: 12px;
 }
 
 .event-list {
