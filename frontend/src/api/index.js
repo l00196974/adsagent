@@ -134,11 +134,25 @@ export const extractEvents = (userIds = null) => {
   }).then(r => r.data)
 }
 
+// 批量生成的别名（兼容旧代码）
+export const startBatchExtract = extractEvents
+
 export const extractEventsForUser = (userId) => {
   // 单用户逻辑行为生成也需要更长的超时时间（3分钟）
   return axios.post(`${BASE_URL}/logical-behaviors/generate/${userId}`, {}, {
     timeout: 180000
   }).then(r => r.data)
+}
+
+// 获取生成进度
+export const getExtractProgress = () => {
+  return axios.get(`${BASE_URL}/logical-behaviors/progress`)
+    .then(r => r.data)
+}
+
+// 流式批量生成（暂不支持，返回错误提示）
+export const startBatchExtractStream = () => {
+  return Promise.reject(new Error('流式批量生成暂不支持，请使用普通批量生成'))
 }
 
 export const listEventSequences = (limit = 100, offset = 0) => {
@@ -154,6 +168,12 @@ export const getUserSequence = (userId) => {
 
 export const getUserDetail = (userId) => {
   return axios.get(`${BASE_URL}/logical-behaviors/users/${userId}/detail`)
+    .then(r => r.data)
+}
+
+// 获取事件统计（用于序列挖掘页面）
+export const getEventStats = () => {
+  return axios.get(`${BASE_URL}/sequence-mining/event-types`)
     .then(r => r.data)
 }
 

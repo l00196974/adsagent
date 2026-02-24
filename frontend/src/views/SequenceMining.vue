@@ -689,8 +689,9 @@ const parsePattern = (patternStr) => {
 
 const checkEventData = async () => {
   try {
-    const res = await axios.get('/api/v1/events/stats')
-    hasEventData.value = res.data.data && res.data.data.users_with_events > 0
+    // 使用新的逻辑行为统计接口
+    const res = await axios.get('/api/v1/sequence-mining/event-types')
+    hasEventData.value = res.data && res.data.length > 0
   } catch (error) {
     hasEventData.value = false
   }
