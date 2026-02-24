@@ -309,23 +309,21 @@ class SequenceMiningService:
         limit: Optional[int] = None,
         offset: int = 0,
         target_label: Optional[str] = None,  # 目标结果标签
-        target_events: Optional[List[str]] = None,  # 目标事件列表
+        target_events: Optional[List[str]] = None,  # 目标事件列表（action）
         use_cache: bool = True
     ) -> Tuple[List[List[str]], Dict]:
-        """从数据库加载所有用户的事件序列 - 优化版本
-
-        使用分批加载事件详情来减少内存占用
+        """从logical_behaviors表加载所有用户的逻辑行为序列
 
         Args:
             limit: 限制返回数量
             offset: 偏移量
             target_label: 目标结果标签（如"首购"、"换车"等），为None时加载所有用户
-            target_events: 目标事件列表（如["购买", "加购"]），为None时挖掘所有序列
+            target_events: 目标事件列表（如["对比豪华SUV车型", "研究购车方案"]），为None时挖掘所有序列
             use_cache: 是否使用缓存
 
         Returns:
             (sequences, statistics)
-            - sequences: [[event_type1, event_type2, ...], ...]
+            - sequences: [[action1, action2, ...], ...]
             - statistics: {
                 "label_distribution": {"首购": 10, "换车": 5, ...},
                 "target_users": 50  # 包含目标事件的用户数
@@ -345,24 +343,24 @@ class SequenceMiningService:
         with sqlite3.connect(self.db_path) as conn:
             cursor = conn.cursor()
 
-            # 构建查询 - 只加载成功状态且非空的序列，并关联用户标签
+            # 构建查询 - 从logical_behavior_sequences获取成功状态的用户
             if target_label:
                 # 过滤特定标签的用户
                 query = """
-                    SELECT es.user_id, es.sequence, up.properties
-                    FROM event_sequences es
-                    JOIN user_profiles up ON es.user_id = up.user_id
-                    WHERE es.status = 'success' AND es.sequence != '[]'
-                    ORDER BY es.user_id
+                    SELECT lbs.user_id, up.properties
+                    FROM logical_behavior_sequences lbs
+                    JOIN user_profiles up ON lbs.user_id = up.user_id
+                    WHERE lbs.status = 'success' AND lbs.behavior_count > 0
+                    ORDER BY lbs.user_id
                 """
             else:
                 # 加载所有用户，但仍然获取标签信息用于统计
                 query = """
-                    SELECT es.user_id, es.sequence, up.properties
-                    FROM event_sequences es
-                    LEFT JOIN user_profiles up ON es.user_id = up.user_id
-                    WHERE es.status = 'success' AND es.sequence != '[]'
-                    ORDER BY es.user_id
+                    SELECT lbs.user_id, up.properties
+                    FROM logical_behavior_sequences lbs
+                    LEFT JOIN user_profiles up ON lbs.user_id = up.user_id
+                    WHERE lbs.status = 'success' AND lbs.behavior_count > 0
+                    ORDER BY lbs.user_id
                 """
 
             if limit:
@@ -374,11 +372,10 @@ class SequenceMiningService:
             all_rows = cursor.fetchall()
 
             # 第一遍：过滤用户并统计标签分布
-            filtered_rows = []
+            filtered_user_ids = []
             for row in all_rows:
                 user_id = row[0]
-                sequence_json = row[1]
-                properties_json = row[2]
+                properties_json = row[1]
 
                 # 解析用户标签
                 user_label = None
@@ -396,93 +393,36 @@ class SequenceMiningService:
 
                 # 如果指定了目标标签，只保留匹配的用户
                 if target_label is None or user_label == target_label:
-                    filtered_rows.append((user_id, sequence_json))
+                    filtered_user_ids.append(user_id)
 
-            app_logger.info(f"标签过滤: 总用户数={len(all_rows)}, 目标标签={target_label}, 过滤后={len(filtered_rows)}")
+            app_logger.info(f"标签过滤: 总用户数={len(all_rows)}, 目标标签={target_label}, 过滤后={len(filtered_user_ids)}")
             app_logger.info(f"标签分布: {label_distribution}")
 
-            # 收集所有需要查询的event_id
-            all_event_ids = []
-            for row in filtered_rows:
-                event_ids = json.loads(row[1])
+            # 第二遍：加载每个用户的逻辑行为序列
+            for user_id in filtered_user_ids:
+                cursor.execute("""
+                    SELECT action, start_time
+                    FROM logical_behaviors
+                    WHERE user_id = ?
+                    ORDER BY start_time ASC
+                """, (user_id,))
 
-                # 类型检查：确保 event_ids 是字符串列表
-                if isinstance(event_ids, list):
-                    # 过滤出字符串类型的 event_id
-                    valid_event_ids = [
-                        eid for eid in event_ids
-                        if isinstance(eid, str)
-                    ]
-
-                    # 如果列表中包含字典（错误格式），记录警告
-                    if len(valid_event_ids) < len(event_ids):
-                        app_logger.warning(
-                            f"用户 {row[0]} 的 sequence 字段包含非字符串元素，"
-                            f"已过滤 {len(event_ids) - len(valid_event_ids)} 个无效元素"
-                        )
-
-                    all_event_ids.extend(valid_event_ids)
-                else:
-                    app_logger.error(f"用户 {row[0]} 的 sequence 字段格式错误: {type(event_ids)}")
-
-            # 分批查询事件详情 (每批10000个ID)
-            event_map = {}
-            if all_event_ids:
-                batch_size = 10000
-                total_ids = len(all_event_ids)
-                app_logger.info(f"分批加载 {total_ids} 个事件详情")
-
-                for i in range(0, total_ids, batch_size):
-                    batch_ids = all_event_ids[i:i + batch_size]
-                    placeholders = ','.join('?' * len(batch_ids))
-                    cursor.execute(f"""
-                        SELECT event_id, event_type, event_category
-                        FROM extracted_events
-                        WHERE event_id IN ({placeholders})
-                    """, batch_ids)
-
-                    # 更新event_map - 现在包含事件类型和分类
-                    for row in cursor.fetchall():
-                        event_map[row[0]] = (row[1], row[2] or 'engagement')
-
-                    # 定期检查内存
-                    if (i // batch_size + 1) % 5 == 0:
-                        memory_monitor.check_memory()
-
-                app_logger.info(f"事件详情加载完成: {len(event_map)} 个事件")
-
-            # 构建序列并截取到目标事件
-            for row in filtered_rows:
-                user_id = row[0]
-                event_ids = json.loads(row[1])
-
-                # 类型检查：确保 event_ids 是字符串列表
-                if not isinstance(event_ids, list):
-                    app_logger.error(f"用户 {user_id} 的 sequence 字段格式错误: {type(event_ids)}")
+                behaviors = cursor.fetchall()
+                if not behaviors:
                     continue
 
-                # 过滤出字符串类型的 event_id
-                valid_event_ids = [eid for eid in event_ids if isinstance(eid, str)]
-
-                # 从字典中查找事件类型
+                # 构建行为序列（使用action作为事件类型）
                 full_sequence = []
                 target_index = -1
 
-                for idx, event_id in enumerate(valid_event_ids):
-                    event_info = event_map.get(event_id)
-                    if not event_info:
-                        continue
-
-                    event_type, category = event_info
-
+                for idx, (action, start_time) in enumerate(behaviors):
                     # 事件标准化
-                    event_type = self._normalize_event_type(event_type)
-                    full_sequence.append(event_type)
+                    action = self._normalize_event_type(action)
+                    full_sequence.append(action)
 
                     # 检查是否匹配目标事件列表
-                    if target_events and event_type in target_events and target_index == -1:
-                        # 记录在 full_sequence 中的索引位置
-                        target_index = len(full_sequence) - 1
+                    if target_events and action in target_events and target_index == -1:
+                        target_index = idx
 
                 # 过滤和截取
                 if target_events:
@@ -495,7 +435,7 @@ class SequenceMiningService:
                     if full_sequence:
                         sequences.append(full_sequence)
 
-        # 缓存结果（注意：缓存时不包含标签信息，避免缓存失效）
+        # 缓存结果
         if use_cache and limit and offset == 0 and target_label is None and target_events is None:
             self.cache.set_sequences(sequences, limit, ttl=300)
 
@@ -786,9 +726,9 @@ class SequenceMiningService:
             with sqlite3.connect(self.db_path) as conn:
                 cursor = conn.cursor()
                 cursor.execute("""
-                    SELECT event_type, COUNT(*) as count
-                    FROM extracted_events
-                    GROUP BY event_type
+                    SELECT action, COUNT(*) as count
+                    FROM logical_behaviors
+                    GROUP BY action
                     ORDER BY count DESC
                 """)
 
@@ -799,7 +739,7 @@ class SequenceMiningService:
                         "count": row[1]
                     })
 
-                app_logger.info(f"✓ 查询到 {len(event_types)} 种事件类型")
+                app_logger.info(f"✓ 查询到 {len(event_types)} 种事件类型（逻辑行为）")
                 return event_types
 
         except Exception as e:
@@ -831,59 +771,46 @@ class SequenceMiningService:
         with sqlite3.connect(self.db_path) as conn:
             cursor = conn.cursor()
 
-            # 查询事件序列（使用可配置的限制）
+            # 查询逻辑行为序列（使用可配置的限制）
             cursor.execute("""
-                SELECT user_id, sequence
-                FROM event_sequences
+                SELECT user_id
+                FROM logical_behavior_sequences
+                WHERE status = 'success' AND behavior_count > 0
                 LIMIT ?
             """, (max_scan,))
 
-            all_rows = cursor.fetchall()
-
-            # 收集所有需要查询的event_id
-            all_event_ids = []
-            for row in all_rows:
-                event_ids = json.loads(row[1])
-                all_event_ids.extend(event_ids)
-
-            # 批量查询所有事件（一次查询，避免N+1问题）
-            event_map = {}
-            if all_event_ids:
-                placeholders = ','.join('?' * len(all_event_ids))
-                cursor.execute(f"""
-                    SELECT event_id, event_type, timestamp, context
-                    FROM extracted_events
-                    WHERE event_id IN ({placeholders})
-                """, all_event_ids)
-
-                for row in cursor.fetchall():
-                    event_map[row[0]] = {
-                        "event_type": row[1],
-                        "timestamp": row[2],
-                        "context": json.loads(row[3]) if row[3] else {}
-                    }
+            user_ids = [row[0] for row in cursor.fetchall()]
 
             # 构建示例
-            for row in all_rows:
+            for user_id in user_ids:
                 if len(examples) >= limit:
                     break
 
-                user_id = row[0]
-                event_ids = json.loads(row[1])
+                # 查询该用户的逻辑行为序列
+                cursor.execute("""
+                    SELECT action, start_time, agent, scene, object
+                    FROM logical_behaviors
+                    WHERE user_id = ?
+                    ORDER BY start_time ASC
+                """, (user_id,))
 
-                # 从字典中查找事件信息（O(1)查找）
-                event_types = []
+                behaviors = cursor.fetchall()
+                if not behaviors:
+                    continue
+
+                # 构建事件类型序列和详细信息
+                event_types = [b[0] for b in behaviors]  # action
                 event_details = []
-
-                for event_id in event_ids:
-                    event_info = event_map.get(event_id)
-                    if event_info:
-                        event_types.append(event_info["event_type"])
-                        event_details.append({
-                            "event_type": event_info["event_type"],
-                            "timestamp": event_info["timestamp"],
-                            "context": event_info["context"]
-                        })
+                for action, start_time, agent, scene, obj in behaviors:
+                    event_details.append({
+                        "event_type": action,
+                        "timestamp": start_time,
+                        "context": {
+                            "agent": agent,
+                            "scene": scene,
+                            "object": obj
+                        }
+                    })
 
                 # 检查是否包含目标模式
                 if self._contains_pattern(event_types, pattern):
