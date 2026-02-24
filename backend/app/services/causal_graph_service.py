@@ -135,13 +135,13 @@ class CausalGraphService:
 
     def _extract_user_examples(self, patterns: List[Dict]) -> List[Dict]:
         """从模式中提取用户示例"""
-        # 简化实现：从event_sequences表中提取用户序列
+        # 简化实现：从logical_behavior_sequences表中提取用户序列
         try:
             with sqlite3.connect(self.db_path) as conn:
                 cursor = conn.cursor()
                 cursor.execute(
                     """SELECT user_id, sequence, start_time, end_time
-                       FROM event_sequences
+                       FROM logical_behavior_sequences
                        LIMIT 100"""
                 )
 
@@ -205,14 +205,14 @@ class CausalGraphService:
                 cursor = conn.cursor()
 
                 # 1. 总用户数
-                cursor.execute("SELECT COUNT(DISTINCT user_id) FROM event_sequences WHERE status = 'success'")
+                cursor.execute("SELECT COUNT(DISTINCT user_id) FROM logical_behavior_sequences WHERE status = 'success'")
                 total_users = cursor.fetchone()[0]
 
                 # 2. 转化率统计
                 cursor.execute("""
                     SELECT COUNT(DISTINCT user_id)
-                    FROM extracted_events
-                    WHERE event_type IN ('购买', '加购')
+                    FROM logical_behaviors
+                    WHERE action IN ('购买', '加购')
                 """)
                 converted_users = cursor.fetchone()[0]
                 conversion_rate = (converted_users / total_users * 100) if total_users > 0 else 0
@@ -223,19 +223,19 @@ class CausalGraphService:
                     pattern_sequence = json.loads(pattern['pattern_sequence'])
 
                     # 找出包含该模式的用户
-                    cursor.execute("SELECT user_id, sequence FROM event_sequences WHERE status = 'success'")
+                    cursor.execute("SELECT user_id, sequence FROM logical_behavior_sequences WHERE status = 'success'")
 
                     matching_users = []
                     for row in cursor.fetchall():
                         user_id = row[0]
                         event_ids = json.loads(row[1])
 
-                        # 获取事件类型序列
+                        # 获取行为类型序列（使用action字段）
                         if event_ids:
                             placeholders = ','.join('?' * len(event_ids))
                             cursor.execute(
-                                f"""SELECT event_type FROM extracted_events
-                                   WHERE event_id IN ({placeholders})
+                                f"""SELECT action FROM logical_behaviors
+                                   WHERE behavior_id IN ({placeholders})
                                    ORDER BY timestamp""",
                                 event_ids
                             )
@@ -256,7 +256,7 @@ class CausalGraphService:
                 # 4. 事件转移概率矩阵
                 cursor.execute("""
                     SELECT es.user_id, es.sequence
-                    FROM event_sequences es
+                    FROM logical_behavior_sequences es
                     WHERE es.status = 'success'
                 """)
 
@@ -267,15 +267,15 @@ class CausalGraphService:
                     user_id = row[0]
                     event_ids = json.loads(row[1])
 
-                    # 获取该用户的事件类型序列
+                    # 获取该用户的行为类型序列（使用action字段）
                     if not event_ids:
                         continue
 
                     placeholders = ','.join('?' * len(event_ids))
                     cursor.execute(
-                        f"""SELECT event_id, event_type
-                           FROM extracted_events
-                           WHERE event_id IN ({placeholders})
+                        f"""SELECT behavior_id, action
+                           FROM logical_behaviors
+                           WHERE behavior_id IN ({placeholders})
                            ORDER BY timestamp""",
                         event_ids
                     )
@@ -307,7 +307,7 @@ class CausalGraphService:
                 for gender in ['男', '女']:
                     cursor.execute("""
                         SELECT COUNT(DISTINCT es.user_id)
-                        FROM event_sequences es
+                        FROM logical_behavior_sequences es
                         JOIN user_profiles up ON es.user_id = up.user_id
                         WHERE up.gender = ? AND es.status = 'success'
                     """, (gender,))
@@ -315,9 +315,9 @@ class CausalGraphService:
 
                     cursor.execute("""
                         SELECT COUNT(DISTINCT ee.user_id)
-                        FROM extracted_events ee
+                        FROM logical_behaviors ee
                         JOIN user_profiles up ON ee.user_id = up.user_id
-                        WHERE up.gender = ? AND ee.event_type IN ('购买', '加购')
+                        WHERE up.gender = ? AND ee.action IN ('购买', '加购')
                     """, (gender,))
                     gender_converted = cursor.fetchone()[0]
 
@@ -337,7 +337,7 @@ class CausalGraphService:
                 for label, min_age, max_age in age_groups:
                     cursor.execute("""
                         SELECT COUNT(DISTINCT es.user_id)
-                        FROM event_sequences es
+                        FROM logical_behavior_sequences es
                         JOIN user_profiles up ON es.user_id = up.user_id
                         WHERE up.age >= ? AND up.age < ? AND es.status = 'success'
                     """, (min_age, max_age))
@@ -345,9 +345,9 @@ class CausalGraphService:
 
                     cursor.execute("""
                         SELECT COUNT(DISTINCT ee.user_id)
-                        FROM extracted_events ee
+                        FROM logical_behaviors ee
                         JOIN user_profiles up ON ee.user_id = up.user_id
-                        WHERE up.age >= ? AND up.age < ? AND ee.event_type IN ('购买', '加购')
+                        WHERE up.age >= ? AND up.age < ? AND ee.action IN ('购买', '加购')
                     """, (min_age, max_age))
                     age_converted = cursor.fetchone()[0]
 
@@ -360,10 +360,10 @@ class CausalGraphService:
                 # 7. 按职业分组统计（全局，只统计人数>=5的职业）
                 cursor.execute("""
                     SELECT up.occupation, COUNT(DISTINCT es.user_id) as total,
-                           COUNT(DISTINCT CASE WHEN ee.event_type IN ('购买', '加购') THEN ee.user_id END) as converted
-                    FROM event_sequences es
+                           COUNT(DISTINCT CASE WHEN ee.action IN ('购买', '加购') THEN ee.user_id END) as converted
+                    FROM logical_behavior_sequences es
                     JOIN user_profiles up ON es.user_id = up.user_id
-                    LEFT JOIN extracted_events ee ON es.user_id = ee.user_id
+                    LEFT JOIN logical_behaviors ee ON es.user_id = ee.user_id
                     WHERE es.status = 'success' AND up.occupation IS NOT NULL
                     GROUP BY up.occupation
                     HAVING total >= 5
