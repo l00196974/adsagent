@@ -3,7 +3,7 @@
     <el-card>
       <template #header>
         <div class="card-header">
-          <span>事件抽象</span>
+          <span>逻辑行为生成</span>
           <div>
             <el-button
               type="primary"
@@ -11,7 +11,7 @@
               :loading="batchLoading"
               :disabled="extractProgress.status === 'running'"
             >
-              批量事件抽象
+              批量逻辑行为生成
             </el-button>
             <el-button @click="loadData">刷新</el-button>
           </div>
@@ -21,7 +21,7 @@
       <!-- 进度展示 -->
       <el-card v-if="extractProgress.status === 'running'" class="progress-card" shadow="never">
         <div class="progress-header">
-          <span>批量抽象进行中...</span>
+          <span>批量生成进行中...</span>
           <el-tag type="info">{{ extractProgress.current_batch }}/{{ extractProgress.total_batches }} 批次</el-tag>
         </div>
 
@@ -84,7 +84,7 @@
       <el-alert
         v-if="extractProgress.status === 'completed'"
         type="success"
-        title="批量抽象完成"
+        title="批量生成完成"
         :description="`成功: ${extractProgress.success_count}/${extractProgress.total_users}, 失败: ${extractProgress.failed_count}/${extractProgress.total_users}`"
         show-icon
         closable
@@ -96,7 +96,7 @@
       <el-alert
         v-if="extractProgress.status === 'failed'"
         type="error"
-        title="批量抽象失败"
+        title="批量生成失败"
         :description="extractProgress.error_message"
         show-icon
         closable
@@ -172,9 +172,9 @@
 
         <el-table-column label="状态" width="120">
           <template #default="scope">
-            <el-tag v-if="scope.row.status === 'success'" type="success">已抽象</el-tag>
+            <el-tag v-if="scope.row.status === 'success'" type="success">已生成</el-tag>
             <el-tag v-else-if="scope.row.status === 'failed'" type="danger">失败</el-tag>
-            <el-tag v-else type="info">未抽象</el-tag>
+            <el-tag v-else type="info">未生成</el-tag>
           </template>
         </el-table-column>
 
@@ -266,13 +266,31 @@
         </el-scrollbar>
 
         <!-- 逻辑行为序列 -->
-        <el-divider content-position="left">逻辑行为序列</el-divider>
+        <el-divider content-position="left">逻辑行为序列 (4元组)</el-divider>
         <el-scrollbar max-height="300px">
-          <ol v-if="userEvents && userEvents.length > 0" class="event-list">
-            <li v-for="(event, index) in userEvents" :key="index" class="event-item">
-              {{ event }}
-            </li>
-          </ol>
+          <div v-if="userEvents && userEvents.length > 0" class="logical-behavior-list">
+            <div v-for="(event, index) in userEvents" :key="index" class="logical-behavior-item">
+              <div class="behavior-index">{{ index + 1 }}</div>
+              <div class="behavior-content">
+                <div class="behavior-field">
+                  <span class="field-label">本体:</span>
+                  <el-tag size="small" type="primary">{{ event.agent || '-' }}</el-tag>
+                </div>
+                <div class="behavior-field">
+                  <span class="field-label">环境:</span>
+                  <el-tag size="small" type="info">{{ event.scene || '-' }}</el-tag>
+                </div>
+                <div class="behavior-field">
+                  <span class="field-label">行为:</span>
+                  <el-tag size="small" type="success">{{ event.action || '-' }}</el-tag>
+                </div>
+                <div class="behavior-field">
+                  <span class="field-label">客体:</span>
+                  <el-tag size="small" type="warning">{{ event.object || '-' }}</el-tag>
+                </div>
+              </div>
+            </div>
+          </div>
           <ol v-else-if="selectedUser.event_sequence && selectedUser.event_sequence.length > 0">
             <li v-for="(event, index) in selectedUser.event_sequence" :key="index">
               {{ event }}
@@ -333,7 +351,7 @@ const loadData = async () => {
   loading.value = true
   try {
     const offset = (currentPage.value - 1) * pageSize.value
-    const response = await axios.get('/api/v1/events/sequences', {
+    const response = await axios.get('/api/v1/logical-behaviors/sequences', {
       params: {
         limit: pageSize.value,
         offset: offset
@@ -358,8 +376,8 @@ const loadData = async () => {
 const handleBatchExtract = async () => {
   try {
     await ElMessageBox.confirm(
-      '将对所有未抽象的用户进行事件抽象,此操作可能需要较长时间,是否继续?',
-      '批量事件抽象',
+      '将对所有未生成的用户进行逻辑行为生成,此操作可能需要较长时间,是否继续?',
+      '批量逻辑行为生成',
       {
         confirmButtonText: '确定',
         cancelButtonText: '取消',
@@ -370,7 +388,7 @@ const handleBatchExtract = async () => {
     batchLoading.value = true
 
     // 启动LLM日志记录
-    startLLMLog('批量事件抽象')
+    startLLMLog('批量逻辑行为生成')
     appendLLMLog('正在启动后台任务...\n')
 
     // 重置进度
@@ -491,8 +509,8 @@ const handleSingleExtract = async (userId) => {
     extractingUsers[userId] = true
 
     // 启动LLM日志记录
-    startLLMLog(`事件抽象 - ${userId}`)
-    appendLLMLog(`正在为用户 ${userId} 抽象事件...\n`)
+    startLLMLog(`逻辑行为生成 - ${userId}`)
+    appendLLMLog(`正在为用户 ${userId} 生成逻辑行为...\n`)
     appendLLMLog(`\n--- LLM实时响应 ---\n`)
 
     // 使用流式API
@@ -773,5 +791,52 @@ ol li {
 
 .error-message {
   margin-top: 8px;
+}
+
+.logical-behavior-list {
+  padding: 10px;
+}
+
+.logical-behavior-item {
+  display: flex;
+  gap: 12px;
+  padding: 12px;
+  margin-bottom: 12px;
+  background: #f5f7fa;
+  border-radius: 4px;
+  border-left: 3px solid #409eff;
+}
+
+.behavior-index {
+  min-width: 30px;
+  height: 30px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #409eff;
+  color: white;
+  border-radius: 50%;
+  font-weight: 600;
+  font-size: 14px;
+}
+
+.behavior-content {
+  flex: 1;
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 8px;
+}
+
+.behavior-field {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.field-label {
+  font-size: 12px;
+  color: #606266;
+  font-weight: 500;
+  min-width: 40px;
 }
 </style>
