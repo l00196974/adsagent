@@ -232,25 +232,6 @@ async def list_media_tags(
         raise HTTPException(status_code=500, detail=f"查询失败: {str(e)}")
 
 
-@router.get("/media-tags/status")
-async def get_media_tagging_status():
-    """查询媒体打标进度"""
-    try:
-        # TODO: 实现进度查询逻辑
-        return {
-            "code": 0,
-            "data": {
-                "status": "idle",  # idle, in_progress, completed, failed
-                "total": 0,
-                "completed": 0,
-                "progress": 0.0
-            }
-        }
-    except Exception as e:
-        app_logger.error(f"查询打标进度失败: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"查询失败: {str(e)}")
-
-
 # ========== 用户画像接口 ==========
 
 @router.post("/profiles/import")
