@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Advertising Knowledge Graph System - A dual-graph system (knowledge graph + event graph) for automotive advertising decision support, combining user behavior analysis with LLM-powered causal reasoning.
 
-**Tech Stack**: FastAPI + Vue 3 + NetworkX + SQLite + Anthropic API
+**Tech Stack**: FastAPI + Vue 3 + NetworkX + SQLite + OpenAI-compatible LLM API (MiniMax/OpenAI)
 
 ## Development Commands
 
@@ -24,7 +24,8 @@ pip install -r requirements.txt
 
 # Required environment setup
 cp .env.example .env
-# Edit .env to add ANTHROPIC_API_KEY
+# Edit .env to add OPENAI_API_KEY and OPENAI_BASE_URL
+# Default config uses MiniMax API (OpenAI-compatible)
 ```
 
 ### Frontend (Vue 3 + Vite)
@@ -45,13 +46,20 @@ npm run build
 ### Testing
 
 ```bash
-# Backend tests (if available)
+# Backend tests
 cd backend
-pytest
+pytest  # Note: pytest must be installed first (not in requirements.txt)
+
+# Run specific test file
+pytest tests/test_streaming_implementation.py -v
 
 # Frontend tests
 cd frontend
-npm test
+npm test  # Note: No test files currently exist
+
+# Clear Python cache after code changes
+find backend -name "*.pyc" -delete
+find backend -name "__pycache__" -type d -exec rm -rf {} +
 ```
 
 ## Architecture Overview
@@ -150,14 +158,28 @@ Extracts high-level events from user behavior sequences using LLM.
 
 **Key Methods**:
 - `extract_events_for_user(user_id)`: Extract events for single user
-- `extract_events_batch(user_ids)`: Batch process multiple users (20 users/batch)
+- `extract_events_batch(user_ids)`: Batch process multiple users (dynamic batch sizing)
 - `_process_single_batch()`: Internal batch processing with parallel execution
 
 **Database Tables**:
 - `extracted_events`: Stores extracted events (event_id, user_id, event_type, timestamp, context)
-- `event_sequences`: Tracks extraction status and sequences per user
+- `event_sequences`: Tracks extraction status and sequences per user (status: 'success', 'failed', 'pending')
 
-**Performance Pattern**: Uses batch processing (20 users/batch) with parallel execution to handle large datasets efficiently.
+**Batch Processing Pattern**:
+- Dynamic batch sizing based on token estimation (max 25000 tokens/batch)
+- Parallel execution with configurable workers (default: 4 concurrent workers)
+- Real-time progress updates after each batch completes
+- **Progress tracking**: Uses `_update_progress()` with nonlocal variables for immediate updates
+
+**Query Pattern for Re-extraction**:
+```python
+# Only process users that haven't succeeded
+SELECT DISTINCT user_id FROM behavior_data
+WHERE user_id NOT IN (
+    SELECT user_id FROM event_sequences WHERE status = 'success'
+)
+```
+This ensures failed users are included in batch re-extraction.
 
 ### EventGraphBuilder ([backend/app/services/event_graph.py](backend/app/services/event_graph.py))
 
@@ -186,12 +208,27 @@ Natural language question answering over knowledge graphs.
 
 ### LLM Integration Pattern ([backend/app/core/openai_client.py](backend/app/core/openai_client.py))
 
-**CRITICAL**: The system uses a unified LLM client that supports multiple providers (OpenAI, MiniMax, etc.).
+**CRITICAL**: The system uses a unified LLM client that supports multiple providers (OpenAI, MiniMax, etc.). **All LLM calls use streaming mode exclusively.**
 
 **Key Methods**:
-- `chat_completion(prompt, max_tokens, stream)`: Unified LLM call interface
+- `chat_completion(prompt, max_tokens, temperature)`: Unified LLM call interface (async generator, always streaming)
 - `abstract_events_batch(user_behaviors, user_profiles)`: Batch event extraction from behaviors
-- `_stream_chat()`: Internal streaming implementation
+- `_stream_chat()`: Internal streaming implementation with hardcoded `stream=True`
+- `_collect_stream_response()`: Helper to collect full response from stream
+
+**Streaming Architecture**:
+- **100% streaming usage**: All 13 LLM call points use streaming mode
+- **No stream parameter**: The `stream` parameter has been removed from `chat_completion()`
+- **Async generator pattern**: `chat_completion()` is an async generator that yields chunks
+- **Usage pattern**:
+  ```python
+  # Correct - get async generator and collect response
+  stream_generator = self.chat_completion(prompt, max_tokens=8000)
+  response = await self._collect_stream_response(stream_generator)
+
+  # Wrong - don't await chat_completion directly
+  response = await self.chat_completion(prompt)  # ❌ Returns coroutine, not string
+  ```
 
 **Output Format Pattern**:
 - **Text-based format preferred over JSON**: Use pipe-delimited text (`user_id|event_type|timestamp|context`) instead of JSON for LLM outputs
@@ -218,6 +255,7 @@ Natural language question answering over knowledge graphs.
 - Frontend timeout must be >= backend timeout (use 180s for single user extraction)
 - Display LLM raw responses in UI for transparency
 - Use global LLM log panel ([frontend/src/stores/llmLog.js](frontend/src/stores/llmLog.js)) for real-time feedback
+- **Progress display**: Show progress in progress bars, not in LLM log panel
 
 ## Error Handling & Logging
 
@@ -279,11 +317,12 @@ if not entity_name.replace('_', '').replace('-', '').replace(' ', '').isalnum():
 
 ### Known Security Issues (P1 Priority)
 
-1. **CSV Upload Vulnerability** ([backend/app/api/sample_routes.py](backend/app/api/sample_routes.py)):
+1. **CSV Upload Vulnerability** ([backend/app/api/flexible_import_routes.py:28-32](backend/app/api/flexible_import_routes.py#L28-L32)):
    - Only checks file extension (can be bypassed)
    - No file size limit
+   - Writes to `/tmp/` without sanitization
    - `pd.read_csv()` can execute formulas
-   - **Fix**: Validate MIME type, limit size, disable formula execution
+   - **Fix**: Validate MIME type, limit size (e.g., 100MB), disable formula execution with `engine='python'`
 
 ## Performance Considerations
 
@@ -321,12 +360,14 @@ for rel in relations:
 ### Backend Config ([backend/app/core/config.py](backend/app/core/config.py))
 
 Environment variables (set in `.env`):
-- `ANTHROPIC_API_KEY`: Required for LLM features
+- `OPENAI_API_KEY`: Required for LLM features (supports MiniMax and other OpenAI-compatible APIs)
+- `OPENAI_BASE_URL`: LLM API base URL (default: https://api.minimaxi.com/v1)
 - `APP_HOST`: Server bind address (default: 0.0.0.0)
 - `APP_PORT`: Server port (default: 8000)
-- `PRIMARY_MODEL`: LLM model (default: glm-4.6-flash)
-- `REASONING_MODEL`: Reasoning model (default: qwen3-32b)
-- `MAX_TOKENS_PER_REQUEST`: Token limit (default: 30000)
+- `PRIMARY_MODEL`: LLM model for general tasks (default: glm-4.6-flash)
+- `REASONING_MODEL`: LLM model for complex reasoning (default: qwen3-32b)
+- `MAX_TOKENS_PER_REQUEST`: Token limit per request (default: 30000)
+- `NEO4J_URI`, `NEO4J_USER`, `NEO4J_PASSWORD`: Neo4j config (optional, not currently used)
 
 ### Frontend API Client ([frontend/src/api/index.js](frontend/src/api/index.js))
 
@@ -355,11 +396,14 @@ axios.post(url, data)
 
 ### Database Location
 
-**IMPORTANT**: Database uses relative path `data/graph.db`, which resolves to:
-- Project root: `./data/graph.db` (when running from root)
-- Backend dir: `./backend/data/graph.db` (when running from backend/)
+**IMPORTANT**: The backend always runs from `/home/linxiankun/adsagent/backend` directory, so all code uses relative path `data/graph.db`, which resolves to:
+- **Active database**: `/home/linxiankun/adsagent/backend/data/graph.db` ✓
+- **Old/unused**: `/home/linxiankun/adsagent/data/graph.db` (已备份为 graph.db.backup_old)
 
-**Recommendation**: Use absolute paths in production to avoid confusion.
+**Critical**:
+- Backend must be started from the `backend/` directory: `cd backend && python main.py`
+- All services use relative path `"data/graph.db"` which resolves correctly when running from `backend/`
+- Do NOT run backend from project root, as it will create/use wrong database path
 
 ### Schema
 
@@ -411,10 +455,76 @@ The system is designed for future enhancements:
 2. **Don't forget to use batch operations** - Individual creates are 10x+ slower
 3. **Don't skip input validation** - All user input must be validated via Pydantic
 4. **Don't return raw exceptions to clients** - Use unified exception handlers
-5. **Don't assume database path** - Check working directory when debugging persistence issues
+5. **Don't run backend from wrong directory** - Always run from `backend/` directory, not project root
 6. **Don't use JSON for LLM outputs** - Prefer text-based formats (pipe-delimited) to avoid parsing failures
 7. **Don't use default axios timeout for LLM calls** - Frontend must set explicit timeout (180s+) for event extraction
 8. **Don't modify LLM client without testing** - Python caches .pyc files; clear `__pycache__` after changes
+9. **Don't await chat_completion() directly** - It's an async generator; use `_collect_stream_response()` or iterate with `async for`
+10. **Don't add stream parameter to LLM calls** - All calls are streaming by default; the parameter has been removed
+11. **Don't update progress only after all batches complete** - Use nonlocal variables to update progress after each batch in parallel processing
+
+## Critical Implementation Patterns
+
+### LLM Streaming Pattern
+
+**All LLM calls must use streaming**. The system has been refactored to remove non-streaming branches:
+
+```python
+# Correct pattern
+async def some_llm_operation(self):
+    stream_generator = self.llm_client.chat_completion(
+        prompt="...",
+        max_tokens=8000
+    )
+    full_response = await self.llm_client._collect_stream_response(stream_generator)
+    return full_response
+
+# Also correct - iterate chunks
+async def stream_to_frontend(self):
+    async for chunk in self.llm_client.chat_completion(prompt="...", max_tokens=8000):
+        yield chunk  # Send to SSE endpoint
+```
+
+**Never**:
+- Add `stream=True` parameter (removed from signature)
+- Use `await` on `chat_completion()` directly
+- Expect non-streaming responses
+
+### Batch Progress Tracking Pattern
+
+When implementing parallel batch processing with real-time progress updates:
+
+```python
+async def process_batches_parallel(self, batches):
+    success_count = 0
+    failed_count = 0
+
+    async def process_with_progress(batch):
+        nonlocal success_count, failed_count  # Critical for real-time updates
+
+        result = await self._process_single_batch(batch)
+
+        # Update immediately after each batch
+        success_count += result["success_count"]
+        failed_count += result["failed_count"]
+
+        self._update_progress(
+            processed_users=success_count + failed_count,
+            success_count=success_count,
+            failed_count=failed_count
+        )
+
+        return result
+
+    # Parallel execution with semaphore
+    tasks = [process_with_progress(batch) for batch in batches]
+    results = await asyncio.gather(*tasks)
+```
+
+**Key points**:
+- Use `nonlocal` to share counters across async tasks
+- Update progress inside the task, not after `gather()`
+- This ensures frontend sees real-time progress, not 0% until completion
 
 ## Verification
 
@@ -461,11 +571,97 @@ find backend -name "__pycache__" -type d -exec rm -rf {} +
    - Check backend logs to see if LLM call completed
    - Ensure frontend displays LLM response for debugging
 
-3. **AttributeError in openai_client.py**
+3. **TypeError: 'async for' requires an object with __aiter__ method, got coroutine**
+   - This means you're awaiting `chat_completion()` when you shouldn't
+   - `chat_completion()` is an async generator - don't await it
+   - Use `_collect_stream_response()` or iterate with `async for`
+
+4. **AttributeError in openai_client.py**
    - Class uses `self.primary_model` not `self.model`
    - Clear `__pycache__` and restart backend
 
-4. **JSON parsing failures**
+5. **JSON parsing failures**
    - Switch to text-based format (pipe-delimited)
    - LLM often returns incomplete JSON due to token limits
    - Text format is more robust and easier to parse
+
+6. **Progress stuck at 0% during batch extraction**
+   - Check if progress updates are inside or outside `asyncio.gather()`
+   - Progress must be updated inside each task using `nonlocal` variables
+   - Verify `_update_progress()` is called after each batch, not after all batches
+
+## Recent Major Changes (2026-02-23)
+
+### LLM Streaming Unification
+- **Removed all non-streaming code paths** from `chat_completion()`
+- **Removed `stream` parameter** from method signature
+- **Hardcoded `stream=True`** in OpenAI API calls
+- All 13 LLM call points now use streaming exclusively
+- Compatible with models that only support streaming
+
+### Batch Extraction Progress Fix
+- **Fixed progress tracking** in parallel batch processing
+- Progress now updates after each batch completes (not after all 90 batches)
+- Uses `nonlocal` variables to share state across async tasks
+- Frontend sees real-time progress updates every 1-2 seconds
+
+### Frontend LLM Log Optimization
+- **Removed progress display** from LLM log panel
+- Progress information only shown in progress bars
+- LLM log panel reserved for actual LLM response content
+- Improves user experience and reduces log noise
+
+## Known Issues & Bugs
+
+### Critical Issues (P1)
+
+1. **LLM Conversion Event Recognition Failure**
+   - LLM over-abstracts events (e.g., "购买长城_WEY VV7" → "使用APP")
+   - Fails to identify purchase/add_cart actions despite explicit prompts
+   - All events incorrectly classified as "engagement" instead of "conversion"
+   - **Impact**: Target-oriented sequence mining feature unusable
+   - **Workaround**: Implement rule-based post-processing for conversion events
+
+2. **Async Generator Attribute Error** ([backend/logs/adsagent_error.log](backend/logs/adsagent_error.log))
+   ```python
+   AttributeError: 'async_generator' object has no attribute 'send_progress'
+   ```
+   - Occurs in streaming event extraction endpoint
+   - Attempting to add attributes to async generator objects
+   - **Fix**: Use separate progress tracking mechanism, not generator attributes
+
+3. **Batch Processing Incomplete Results**
+   ```
+   User batch not found in batch results
+   ```
+   - Batch extraction returns incomplete results
+   - Missing error handling for partial batch failures
+   - **Fix**: Add proper error handling and result validation in batch processing
+
+### Medium Priority Issues (P2)
+
+4. **Incomplete Implementations in base_modeling_routes.py**
+   - Line 131: `# TODO: 实现添加逻辑` (Add logic not implemented)
+   - Line 202: `# TODO: 实现进度查询逻辑` (Progress query not implemented)
+   - Line 276: `# TODO: 实现进度查询逻辑` (Progress query not implemented)
+
+5. **Debug Statements in Production Code**
+   - 8 console.log/debugger statements in frontend
+   - Should be removed or wrapped in `if (import.meta.env.DEV)` checks
+
+6. **Frontend Bundle Size Warning**
+   - Main bundle: 1.01MB (335KB gzipped)
+   - Exceeds 500KB threshold
+   - **Recommendation**: Use dynamic imports for route-level code splitting
+
+### Low Priority Issues (P3)
+
+7. **Missing Test Coverage**
+   - Backend: 17 test files exist but pytest not in requirements.txt
+   - Frontend: 0 test files found
+   - No automated testing in CI/CD
+
+8. **Excessive Documentation Files**
+   - 402 markdown files in project
+   - Many are implementation summaries/reports
+   - Should consolidate or archive to `docs/archive/`

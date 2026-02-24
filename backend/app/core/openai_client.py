@@ -27,8 +27,8 @@ class OpenAIClient:
         timestamp = behavior.get("timestamp", "")
         duration = behavior.get("duration", 0)
 
-        # 构建行为描述
-        parts = [timestamp]
+        # 构建行为描述 - 在前面加上 action 标识
+        parts = [f"[action={action}]", timestamp]
 
         if action == "visit_poi" and "poi_info" in behavior:
             poi = behavior["poi_info"]
@@ -62,7 +62,20 @@ class OpenAIClient:
 
         elif action == "purchase" and "item_info" in behavior:
             item = behavior["item_info"]
-            parts.append(f"购买{item['item_name']}")
+            poi_id = behavior.get("poi_id", "")
+            if poi_id:
+                parts.append(f"购买{item['item_name']}在{poi_id}")
+            else:
+                parts.append(f"购买{item['item_name']}")
+
+        elif action == "add_cart" and "item_info" in behavior:
+            item = behavior["item_info"]
+            app_info = behavior.get("app_info", {})
+            app_name = app_info.get("app_name", behavior.get("app_id", ""))
+            if app_name:
+                parts.append(f"将{item['item_name']}加入购物车在{app_name}")
+            else:
+                parts.append(f"将{item['item_name']}加入购物车")
 
         else:
             # 默认格式
@@ -197,7 +210,14 @@ class OpenAIClient:
 
     async def _stream_chat(self, prompt: str, model: str, max_tokens: int, temperature: float, timeout_seconds: float):
         """流式调用 LLM"""
-        client = httpx.AsyncClient(timeout=timeout_seconds)
+        # 为流式响应配置超时：连接超时30s，读取超时使用传入的timeout_seconds
+        timeout_config = httpx.Timeout(
+            connect=30.0,  # 连接超时
+            read=timeout_seconds,  # 读取超时（流式响应可能很长）
+            write=30.0,  # 写入超时
+            pool=30.0   # 连接池超时
+        )
+        client = httpx.AsyncClient(timeout=timeout_config)
         try:
             async with client.stream(
                 "POST",
@@ -229,6 +249,12 @@ class OpenAIClient:
                                     yield content
                         except json.JSONDecodeError:
                             continue
+        except httpx.ReadError as e:
+            logger.error(f"LLM流式读取错误: {e}", exc_info=True)
+            raise Exception(f"LLM API读取超时或网络中断，请重试")
+        except httpx.TimeoutException as e:
+            logger.error(f"LLM调用超时: {e}", exc_info=True)
+            raise Exception(f"LLM API调用超时（{timeout_seconds}秒），请重试")
         finally:
             await client.aclose()
 
@@ -499,26 +525,92 @@ APP名称: {app_name}
     async def abstract_events_batch(
         self,
         user_behaviors: Dict[str, List[Dict]],
-        user_profiles: Dict[str, Dict] = None
+        user_profiles: Dict[str, Dict] = None,
+        batch_size: int = 20  # 每批处理的行为数量
     ) -> Dict[str, List[Dict]]:
-        """批量抽象用户行为为事件
+        """批量抽象用户行为为事件（支持单用户行为分批）
 
         Args:
             user_behaviors: 用户行为数据(已丰富,包含实体详细信息)
             user_profiles: 用户画像数据(可选)
+            batch_size: 每批处理的行为数量（默认20条）
 
         Returns:
             {
-                "user_001": [
-                    {
-                        "event_type": "看车",
-                        "timestamp": "2026-01-01 10:00",
-                        "context": {"poi_type": "4S店", "duration": "2小时"}
-                    }
-                ]
+                "events": {
+                    "user_001": [
+                        {
+                            "event_type": "看车",
+                            "timestamp": "2026-01-01 10:00",
+                            "context": {"poi_type": "4S店", "duration": "2小时"},
+                            "category": "conversion"
+                        }
+                    ]
+                },
+                "llm_response": "..."
             }
         """
-        logger.info(f"开始批量抽象 {len(user_behaviors)} 个用户的行为为事件")
+        logger.info(f"开始批量抽象 {len(user_behaviors)} 个用户的行为为事件（每批{batch_size}条）")
+
+        # 最终结果
+        final_result = {}
+        all_llm_responses = []
+
+        # 对每个用户的行为进行分批处理
+        for user_id, behaviors in user_behaviors.items():
+            final_result[user_id] = []
+
+            # 如果行为数量超过batch_size，分批处理
+            if len(behaviors) > batch_size:
+                logger.info(f"用户 [{user_id}] 有 {len(behaviors)} 条行为，分为 {(len(behaviors) + batch_size - 1) // batch_size} 批处理")
+
+                for batch_idx in range(0, len(behaviors), batch_size):
+                    batch_behaviors = behaviors[batch_idx:batch_idx + batch_size]
+                    logger.info(f"处理用户 [{user_id}] 第 {batch_idx // batch_size + 1} 批（{len(batch_behaviors)} 条行为）")
+
+                    # 调用LLM处理这一批
+                    batch_result = await self._abstract_events_single_batch(
+                        {user_id: batch_behaviors},
+                        user_profiles
+                    )
+
+                    # 合并结果
+                    if user_id in batch_result.get("events", {}):
+                        final_result[user_id].extend(batch_result["events"][user_id])
+                    all_llm_responses.append(batch_result.get("llm_response", ""))
+            else:
+                # 行为数量不多，直接处理
+                batch_result = await self._abstract_events_single_batch(
+                    {user_id: behaviors},
+                    user_profiles
+                )
+                final_result[user_id] = batch_result.get("events", {}).get(user_id, [])
+                all_llm_responses.append(batch_result.get("llm_response", ""))
+
+        logger.info(f"✓ 批量事件抽象完成: 成功 {len([v for v in final_result.values() if v])}/{len(user_behaviors)}")
+
+        return {
+            "events": final_result,
+            "llm_response": "\n\n---\n\n".join(all_llm_responses)
+        }
+
+    async def _abstract_events_single_batch(
+        self,
+        user_behaviors: Dict[str, List[Dict]],
+        user_profiles: Dict[str, Dict] = None
+    ) -> Dict:
+        """处理单批用户行为（内部方法）
+
+        Args:
+            user_behaviors: 单批用户行为数据
+            user_profiles: 用户画像数据
+
+        Returns:
+            {
+                "events": {"user_id": [...]},
+                "llm_response": "..."
+            }
+        """
 
         # 构建批量请求的prompt
         user_behaviors_str = ""
@@ -544,38 +636,53 @@ APP名称: {app_name}
 
             user_behaviors_str += ":\n"
 
-            # 格式化行为描述(使用丰富后的数据)
+            # 格式化行为描述
             for behavior in behaviors:
-                timestamp = behavior.get("timestamp", "")
-                action = behavior.get("action", "")
-                formatted = self._format_enriched_behavior(behavior)
-                user_behaviors_str += f"  - {formatted}\n"
+                # 优先使用 behavior_text（非结构化格式）
+                if "behavior_text" in behavior:
+                    timestamp = behavior.get("timestamp", "")
+                    behavior_text = behavior.get("behavior_text", "")
+                    # 在behavior_text前面加上时间戳
+                    user_behaviors_str += f"  - {timestamp} {behavior_text}\n"
+                else:
+                    # 兼容结构化格式（使用丰富后的数据）
+                    formatted = self._format_enriched_behavior(behavior)
+                    user_behaviors_str += f"  - {formatted}\n"
 
-        prompt = f"""你是一个用户行为分析专家，需要将用户的原始行为数据抽象为高层次的事件。
+        prompt = f"""你是用户行为分析专家。请将用户的原始行为抽象为高层次事件。
 
-## 任务说明
-将用户的细粒度行为（如"在某APP停留X分钟"、"浏览某商品"）抽象为有意义的事件（如"看车"、"关注海岛游"）。
+## 【关键】转化行为识别规则（必须严格遵守）
+
+原始数据中的 [action=xxx] 标签表示行为类型，**必须按以下规则处理**：
+
+1. **[action=purchase]**
+   → 必须输出：事件类型="购买"，事件分类="conversion"
+   → 示例：user_001|购买|2026-01-01 10:00|长城_WEY VV7,长城4S店|conversion
+
+2. **[action=add_cart]**
+   → 必须输出：事件类型="加购"，事件分类="conversion"
+   → 示例：user_001|加购|2025-12-25 22:00|长城_哈弗H6,汽车之家|conversion
+
+3. **[action=visit_poi] 且包含"4S店"或"经销商"**
+   → 必须输出：事件类型="到店"，事件分类="conversion"
+   → 示例：user_001|到店|2025-12-26 14:00|长城4S店,停留1小时|conversion
+
+4. **其他 [action=xxx]**（如 browse, use_app, search 等）
+   → 根据行为内容抽象事件类型，事件分类="engagement"
+   → 示例：user_001|浏览车型|2025-11-26 09:00|长城_哈弗H6,汽车之家|engagement
+
+**重要提醒**：
+- 看到 [action=purchase] 就必须输出"购买|conversion"，不要抽象成其他事件
+- 看到 [action=add_cart] 就必须输出"加购|conversion"，不要抽象成其他事件
+- 不要将转化行为误判为"使用APP"、"浏览车型"等互动事件
 
 ## 用户行为数据
 {user_behaviors_str}
 
-## 抽象规则
-1. **事件类型命名**：2-6个字，简洁明了，如"看车"、"对比车型"、"查看详情"
-2. **时间保留**：保留原始时间戳
-3. **上下文提取**：提取关键信息，如POI类型、停留时长、商品类别等
-4. **合并相似行为**：连续的相似行为可以合并为一个事件
-5. **保留重要细节**：对购买、搜索等关键行为保留详细信息
-
 ## 输出格式
-使用简单的文本格式，每行一个事件，格式如下：
-用户ID|事件类型|时间戳|上下文信息
+每行一个事件，格式：用户ID|事件类型|时间戳|上下文信息|事件分类
 
-示例：
-user_001|看车|2026-01-15 10:00|4S店,宝马,停留2小时
-user_001|浏览车型|2026-01-15 12:30|汽车之家,宝马7系,奔驰S级
-user_002|搜索|2026-01-16 09:00|海岛游,三亚
-
-请直接输出文本，每行一个事件，不要有任何解释或说明："""
+请直接输出，不要有任何解释："""
 
         try:
             # 使用流式调用
@@ -613,13 +720,14 @@ user_002|搜索|2026-01-16 09:00|海岛游,三亚
 
             lines = response.strip().split('\n')
             logger.info(f"开始解析文本格式，共 {len(lines)} 行")
+            logger.info(f"前10行内容: {lines[:10]}")
 
             for line_num, line in enumerate(lines, 1):
                 line = line.strip()
                 if not line:
                     continue
 
-                # 解析每行: 用户ID|事件类型|时间戳|上下文信息
+                # 解析每行: 用户ID|事件类型|时间戳|上下文信息|事件分类
                 parts = line.split('|')
                 if len(parts) < 3:
                     logger.warning(f"第{line_num}行格式错误，跳过: {line}")
@@ -629,6 +737,7 @@ user_002|搜索|2026-01-16 09:00|海岛游,三亚
                 event_type = parts[1].strip()
                 timestamp = parts[2].strip()
                 context_str = parts[3].strip() if len(parts) > 3 else ""
+                category = parts[4].strip() if len(parts) > 4 else "engagement"  # 默认为互动
 
                 # 解析上下文信息（逗号分隔的键值对或简单列表）
                 context = {}
@@ -641,9 +750,10 @@ user_002|搜索|2026-01-16 09:00|海岛游,三亚
                     result[user_id].append({
                         "event_type": event_type,
                         "timestamp": timestamp,
-                        "context": context
+                        "context": context,
+                        "category": category  # 新增：事件分类
                     })
-                    logger.debug(f"解析事件: {user_id} - {event_type} @ {timestamp}")
+                    logger.debug(f"解析事件: {user_id} - {event_type} @ {timestamp} [{category}]")
 
             # 记录解析结果
             for user_id in user_behaviors.keys():
@@ -723,31 +833,40 @@ user_002|搜索|2026-01-16 09:00|海岛游,三亚
                 formatted = self._format_enriched_behavior(behavior)
                 user_behaviors_str += f"  - {formatted}\n"
 
-        prompt = f"""你是一个用户行为分析专家，需要将用户的原始行为数据抽象为高层次的事件。
+        prompt = f"""你是用户行为分析专家。请将用户的原始行为抽象为高层次事件。
 
-## 任务说明
-将用户的细粒度行为（如"在某APP停留X分钟"、"浏览某商品"）抽象为有意义的事件（如"看车"、"关注海岛游"）。
+## 【关键】转化行为识别规则（必须严格遵守）
+
+原始数据中的 [action=xxx] 标签表示行为类型，**必须按以下规则处理**：
+
+1. **[action=purchase]**
+   → 必须输出：事件类型="购买"，事件分类="conversion"
+   → 示例：user_001|购买|2026-01-01 10:00|长城_WEY VV7,长城4S店|conversion
+
+2. **[action=add_cart]**
+   → 必须输出：事件类型="加购"，事件分类="conversion"
+   → 示例：user_001|加购|2025-12-25 22:00|长城_哈弗H6,汽车之家|conversion
+
+3. **[action=visit_poi] 且包含"4S店"或"经销商"**
+   → 必须输出：事件类型="到店"，事件分类="conversion"
+   → 示例：user_001|到店|2025-12-26 14:00|长城4S店,停留1小时|conversion
+
+4. **其他 [action=xxx]**（如 browse, use_app, search 等）
+   → 根据行为内容抽象事件类型，事件分类="engagement"
+   → 示例：user_001|浏览车型|2025-11-26 09:00|长城_哈弗H6,汽车之家|engagement
+
+**重要提醒**：
+- 看到 [action=purchase] 就必须输出"购买|conversion"，不要抽象成其他事件
+- 看到 [action=add_cart] 就必须输出"加购|conversion"，不要抽象成其他事件
+- 不要将转化行为误判为"使用APP"、"浏览车型"等互动事件
 
 ## 用户行为数据
 {user_behaviors_str}
 
-## 抽象规则
-1. **事件类型命名**：2-6个字，简洁明了，如"看车"、"对比车型"、"查看详情"
-2. **时间保留**：保留原始时间戳
-3. **上下文提取**：提取关键信息，如POI类型、停留时长、商品类别等
-4. **合并相似行为**：连续的相似行为可以合并为一个事件
-5. **保留重要细节**：对购买、搜索等关键行为保留详细信息
-
 ## 输出格式
-使用简单的文本格式，每行一个事件，格式如下：
-用户ID|事件类型|时间戳|上下文信息
+每行一个事件，格式：用户ID|事件类型|时间戳|上下文信息|事件分类
 
-示例：
-user_001|看车|2026-01-15 10:00|4S店,宝马,停留2小时
-user_001|浏览车型|2026-01-15 12:30|汽车之家,宝马7系,奔驰S级
-user_002|搜索|2026-01-16 09:00|海岛游,三亚
-
-请直接输出文本，每行一个事件，不要有任何解释或说明："""
+请直接输出，不要有任何解释："""
 
         try:
             # 使用流式调用

@@ -23,8 +23,11 @@ class SequenceMiningService:
         self,
         algorithm: str = "prefixspan",  # "prefixspan" 或 "attention"
         min_support: int = 2,
+        min_length: int = 2,  # 最小序列长度
         max_length: int = 5,
         top_k: int = 20,
+        target_label: Optional[str] = None,  # 目标结果标签（如"首购"、"换车"等）
+        target_events: Optional[List[str]] = None,  # 目标事件列表（如["购买", "加购"]）
         use_cache: bool = True  # 是否使用缓存
     ) -> Dict:
         """挖掘高频事件子序列
@@ -32,8 +35,11 @@ class SequenceMiningService:
         Args:
             algorithm: 算法类型 ("prefixspan" 或 "attention")
             min_support: 最小支持度(出现次数)
+            min_length: 最小序列长度
             max_length: 最大序列长度
             top_k: 返回前K个模式
+            target_label: 目标结果标签（如"首购"、"换车"、"观望"等），为None时挖掘所有用户
+            target_events: 目标事件列表（如["购买", "加购"]），为None时挖掘所有序列
             use_cache: 是否使用缓存
 
         Returns:
@@ -46,16 +52,34 @@ class SequenceMiningService:
         try:
             # 尝试从缓存获取
             if use_cache:
-                cached_result = self.cache.get_patterns(min_support, max_length)
+                # 将target_events转为字符串用于缓存键
+                target_events_str = ','.join(sorted(target_events)) if target_events else None
+                cached_result = self.cache.get_patterns(
+                    min_support,
+                    max_length,
+                    target_label,
+                    target_events_str,
+                    None  # 不再使用 target_category
+                )
                 if cached_result:
-                    app_logger.info(f"从缓存获取模式: min_support={min_support}, max_length={max_length}")
+                    app_logger.info(f"从缓存获取模式: min_support={min_support}, max_length={max_length}, target_label={target_label}, target_events={target_events}")
+                    # 过滤缓存结果中的模式长度
+                    cached_result["frequent_patterns"] = [
+                        p for p in cached_result["frequent_patterns"]
+                        if min_length <= p["length"] <= max_length
+                    ]
+                    cached_result["statistics"]["patterns_found"] = len(cached_result["frequent_patterns"])
                     return cached_result
 
-            app_logger.info(f"开始挖掘高频子序列: algorithm={algorithm}, min_support={min_support}")
+            app_logger.info(f"开始挖掘高频子序列: algorithm={algorithm}, min_support={min_support}, min_length={min_length}, max_length={max_length}, target_label={target_label}, target_events={target_events}")
             memory_monitor.log_memory_usage("挖掘开始")
 
             # 1. 从数据库加载所有用户的事件序列 (限制50,000条)
-            sequences = self._load_event_sequences(limit=50000)
+            sequences, stats = self._load_event_sequences(
+                limit=50000,
+                target_label=target_label,
+                target_events=target_events
+            )
 
             if not sequences:
                 app_logger.warning("没有找到事件序列数据")
@@ -82,8 +106,20 @@ class SequenceMiningService:
 
             memory_monitor.log_memory_usage("模式挖掘完成")
 
-            # 3. 格式化结果并取前K个
+            # 3. 格式化结果并过滤长度，然后取前K个
             formatted_patterns = self._format_patterns(frequent_patterns, len(sequences))
+
+            # 过滤最小长度
+            formatted_patterns = [p for p in formatted_patterns if p["length"] >= min_length]
+
+            # 如果指定了目标事件，只保留以目标事件结尾的模式
+            if target_events:
+                formatted_patterns = [
+                    p for p in formatted_patterns
+                    if p["pattern"][-1] in target_events
+                ]
+                app_logger.info(f"过滤后保留以{target_events}结尾的模式: {len(formatted_patterns)}个")
+
             formatted_patterns = formatted_patterns[:top_k]
 
             # 4. 计算统计信息
@@ -96,8 +132,12 @@ class SequenceMiningService:
                 "unique_event_types": len(unique_events),
                 "avg_sequence_length": round(sum(len(seq) for seq in sequences) / len(sequences), 2) if sequences else 0,
                 "min_support": min_support,
+                "min_length": min_length,
                 "max_length": max_length,
-                "patterns_found": len(formatted_patterns)
+                "patterns_found": len(formatted_patterns),
+                "target_label": target_label,  # 添加目标标签信息
+                "target_events": target_events,  # 添加目标事件信息
+                **stats  # 合并加载序列时的统计信息
             }
 
             result = {
@@ -108,7 +148,16 @@ class SequenceMiningService:
 
             # 缓存结果
             if use_cache:
-                self.cache.set_patterns(result, min_support, max_length, ttl=600)
+                target_events_str = ','.join(sorted(target_events)) if target_events else None
+                self.cache.set_patterns(
+                    result,
+                    min_support,
+                    max_length,
+                    target_label,
+                    target_events_str,
+                    None,  # 不再使用 target_category
+                    ttl=600
+                )
 
             app_logger.info(f"✓ 高频子序列挖掘完成: 找到 {len(formatted_patterns)} 个模式")
 
@@ -231,12 +280,38 @@ class SequenceMiningService:
         app_logger.info(f"Attention 方法挖掘完成: 找到 {len(frequent)} 个频繁模式")
         return frequent
 
+    def _normalize_event_type(self, event_type: str) -> str:
+        """标准化事件类型名称
+
+        Args:
+            event_type: 原始事件类型
+
+        Returns:
+            标准化后的事件类型
+        """
+        normalized = event_type.strip()
+
+        # 同义词映射
+        synonyms = {
+            '使用app': '使用APP',
+            '使用': '使用APP',
+            'app活跃': '活跃',
+            '使用App': '使用APP',
+            '打开app': '打开APP',
+            '打开App': '打开APP',
+            '使用app': '使用APP'
+        }
+
+        return synonyms.get(normalized, normalized)
+
     def _load_event_sequences(
         self,
         limit: Optional[int] = None,
         offset: int = 0,
+        target_label: Optional[str] = None,  # 目标结果标签
+        target_events: Optional[List[str]] = None,  # 目标事件列表
         use_cache: bool = True
-    ) -> List[List[str]]:
+    ) -> Tuple[List[List[str]], Dict]:
         """从数据库加载所有用户的事件序列 - 优化版本
 
         使用分批加载事件详情来减少内存占用
@@ -244,10 +319,17 @@ class SequenceMiningService:
         Args:
             limit: 限制返回数量
             offset: 偏移量
+            target_label: 目标结果标签（如"首购"、"换车"等），为None时加载所有用户
+            target_events: 目标事件列表（如["购买", "加购"]），为None时挖掘所有序列
             use_cache: 是否使用缓存
 
         Returns:
-            [[event_type1, event_type2, ...], ...]
+            (sequences, statistics)
+            - sequences: [[event_type1, event_type2, ...], ...]
+            - statistics: {
+                "label_distribution": {"首购": 10, "换车": 5, ...},
+                "target_users": 50  # 包含目标事件的用户数
+              }
         """
         # 尝试从缓存获取
         if use_cache and limit and offset == 0:
@@ -257,16 +339,31 @@ class SequenceMiningService:
                 return cached_sequences
 
         sequences = []
+        label_distribution = {}
+        target_users = 0
 
         with sqlite3.connect(self.db_path) as conn:
             cursor = conn.cursor()
 
-            # 构建查询
-            query = """
-                SELECT user_id, sequence
-                FROM event_sequences
-                ORDER BY user_id
-            """
+            # 构建查询 - 只加载成功状态且非空的序列，并关联用户标签
+            if target_label:
+                # 过滤特定标签的用户
+                query = """
+                    SELECT es.user_id, es.sequence, up.properties
+                    FROM event_sequences es
+                    JOIN user_profiles up ON es.user_id = up.user_id
+                    WHERE es.status = 'success' AND es.sequence != '[]'
+                    ORDER BY es.user_id
+                """
+            else:
+                # 加载所有用户，但仍然获取标签信息用于统计
+                query = """
+                    SELECT es.user_id, es.sequence, up.properties
+                    FROM event_sequences es
+                    LEFT JOIN user_profiles up ON es.user_id = up.user_id
+                    WHERE es.status = 'success' AND es.sequence != '[]'
+                    ORDER BY es.user_id
+                """
 
             if limit:
                 query += f" LIMIT {limit}"
@@ -276,11 +373,57 @@ class SequenceMiningService:
             cursor.execute(query)
             all_rows = cursor.fetchall()
 
+            # 第一遍：过滤用户并统计标签分布
+            filtered_rows = []
+            for row in all_rows:
+                user_id = row[0]
+                sequence_json = row[1]
+                properties_json = row[2]
+
+                # 解析用户标签
+                user_label = None
+                if properties_json:
+                    try:
+                        properties = json.loads(properties_json)
+                        user_label = properties.get('purchase_intent', 'unknown')
+                    except:
+                        user_label = 'unknown'
+                else:
+                    user_label = 'unknown'
+
+                # 统计标签分布
+                label_distribution[user_label] = label_distribution.get(user_label, 0) + 1
+
+                # 如果指定了目标标签，只保留匹配的用户
+                if target_label is None or user_label == target_label:
+                    filtered_rows.append((user_id, sequence_json))
+
+            app_logger.info(f"标签过滤: 总用户数={len(all_rows)}, 目标标签={target_label}, 过滤后={len(filtered_rows)}")
+            app_logger.info(f"标签分布: {label_distribution}")
+
             # 收集所有需要查询的event_id
             all_event_ids = []
-            for row in all_rows:
+            for row in filtered_rows:
                 event_ids = json.loads(row[1])
-                all_event_ids.extend(event_ids)
+
+                # 类型检查：确保 event_ids 是字符串列表
+                if isinstance(event_ids, list):
+                    # 过滤出字符串类型的 event_id
+                    valid_event_ids = [
+                        eid for eid in event_ids
+                        if isinstance(eid, str)
+                    ]
+
+                    # 如果列表中包含字典（错误格式），记录警告
+                    if len(valid_event_ids) < len(event_ids):
+                        app_logger.warning(
+                            f"用户 {row[0]} 的 sequence 字段包含非字符串元素，"
+                            f"已过滤 {len(event_ids) - len(valid_event_ids)} 个无效元素"
+                        )
+
+                    all_event_ids.extend(valid_event_ids)
+                else:
+                    app_logger.error(f"用户 {row[0]} 的 sequence 字段格式错误: {type(event_ids)}")
 
             # 分批查询事件详情 (每批10000个ID)
             event_map = {}
@@ -293,14 +436,14 @@ class SequenceMiningService:
                     batch_ids = all_event_ids[i:i + batch_size]
                     placeholders = ','.join('?' * len(batch_ids))
                     cursor.execute(f"""
-                        SELECT event_id, event_type
+                        SELECT event_id, event_type, event_category
                         FROM extracted_events
                         WHERE event_id IN ({placeholders})
                     """, batch_ids)
 
-                    # 更新event_map
+                    # 更新event_map - 现在包含事件类型和分类
                     for row in cursor.fetchall():
-                        event_map[row[0]] = row[1]
+                        event_map[row[0]] = (row[1], row[2] or 'engagement')
 
                     # 定期检查内存
                     if (i // batch_size + 1) % 5 == 0:
@@ -308,26 +451,60 @@ class SequenceMiningService:
 
                 app_logger.info(f"事件详情加载完成: {len(event_map)} 个事件")
 
-            # 构建序列
-            for row in all_rows:
+            # 构建序列并截取到目标事件
+            for row in filtered_rows:
                 user_id = row[0]
                 event_ids = json.loads(row[1])
 
-                # 从字典中查找事件类型（O(1)查找）
-                event_types = []
-                for event_id in event_ids:
-                    event_type = event_map.get(event_id)
-                    if event_type:
-                        event_types.append(event_type)
+                # 类型检查：确保 event_ids 是字符串列表
+                if not isinstance(event_ids, list):
+                    app_logger.error(f"用户 {user_id} 的 sequence 字段格式错误: {type(event_ids)}")
+                    continue
 
-                if event_types:
-                    sequences.append(event_types)
+                # 过滤出字符串类型的 event_id
+                valid_event_ids = [eid for eid in event_ids if isinstance(eid, str)]
 
-        # 缓存结果
-        if use_cache and limit and offset == 0:
+                # 从字典中查找事件类型
+                full_sequence = []
+                target_index = -1
+
+                for idx, event_id in enumerate(valid_event_ids):
+                    event_info = event_map.get(event_id)
+                    if not event_info:
+                        continue
+
+                    event_type, category = event_info
+
+                    # 事件标准化
+                    event_type = self._normalize_event_type(event_type)
+                    full_sequence.append(event_type)
+
+                    # 检查是否匹配目标事件列表
+                    if target_events and event_type in target_events and target_index == -1:
+                        # 记录在 full_sequence 中的索引位置
+                        target_index = len(full_sequence) - 1
+
+                # 过滤和截取
+                if target_events:
+                    if target_index >= 0:
+                        # 截取到目标事件（包含目标）
+                        truncated_sequence = full_sequence[:target_index + 1]
+                        sequences.append(truncated_sequence)
+                        target_users += 1
+                else:
+                    if full_sequence:
+                        sequences.append(full_sequence)
+
+        # 缓存结果（注意：缓存时不包含标签信息，避免缓存失效）
+        if use_cache and limit and offset == 0 and target_label is None and target_events is None:
             self.cache.set_sequences(sequences, limit, ttl=300)
 
-        return sequences
+        statistics = {
+            "label_distribution": label_distribution,
+            "target_users": target_users
+        }
+
+        return sequences, statistics
 
     def _simple_frequent_mining(
         self,
@@ -592,6 +769,41 @@ class SequenceMiningService:
 
         except Exception as e:
             app_logger.error(f"删除模式失败: {e}", exc_info=True)
+            raise
+
+    def get_event_types(self) -> List[Dict]:
+        """获取所有事件类型列表
+
+        Returns:
+            事件类型列表，按出现频率降序排序
+            [
+                {"event_type": "浏览车型", "count": 1306},
+                {"event_type": "搜索", "count": 629},
+                ...
+            ]
+        """
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    SELECT event_type, COUNT(*) as count
+                    FROM extracted_events
+                    GROUP BY event_type
+                    ORDER BY count DESC
+                """)
+
+                event_types = []
+                for row in cursor.fetchall():
+                    event_types.append({
+                        "event_type": row[0],
+                        "count": row[1]
+                    })
+
+                app_logger.info(f"✓ 查询到 {len(event_types)} 种事件类型")
+                return event_types
+
+        except Exception as e:
+            app_logger.error(f"查询事件类型失败: {e}", exc_info=True)
             raise
 
     def get_pattern_examples(

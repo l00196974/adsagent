@@ -138,6 +138,58 @@ class EventExtractionService:
         # 非结构化格式，直接返回
         return behaviors
 
+    def _post_process_event_categories(self, events: List[Dict], raw_behaviors: List[Dict]) -> List[Dict]:
+        """规则后处理：修正LLM的错误事件分类
+
+        根据原始行为数据的action字段，强制修正明显的错误分类
+
+        Args:
+            events: LLM返回的事件列表
+            raw_behaviors: 原始行为数据列表
+
+        Returns:
+            修正后的事件列表
+        """
+        # 构建时间戳到action的映射
+        timestamp_to_action = {}
+        for behavior in raw_behaviors:
+            timestamp = behavior.get("timestamp", "")
+            action = behavior.get("action", "")
+            if timestamp and action:
+                timestamp_to_action[timestamp] = action
+
+        # 修正事件分类
+        corrected_count = 0
+        for event in events:
+            event_timestamp = event.get("timestamp", "")
+            event_type = event.get("event_type", "")
+            current_category = event.get("category", "engagement")
+
+            # 查找对应的原始action
+            original_action = timestamp_to_action.get(event_timestamp)
+
+            if original_action:
+                # 规则1: purchase 行为必须是"购买" + conversion
+                if original_action == "purchase":
+                    if event_type != "购买" or current_category != "conversion":
+                        app_logger.info(f"修正事件: {event_type} ({current_category}) → 购买 (conversion)")
+                        event["event_type"] = "购买"
+                        event["category"] = "conversion"
+                        corrected_count += 1
+
+                # 规则2: add_cart 行为必须是"加购" + conversion
+                elif original_action == "add_cart":
+                    if event_type != "加购" or current_category != "conversion":
+                        app_logger.info(f"修正事件: {event_type} ({current_category}) → 加购 (conversion)")
+                        event["event_type"] = "加购"
+                        event["category"] = "conversion"
+                        corrected_count += 1
+
+        if corrected_count > 0:
+            app_logger.info(f"✓ 规则后处理: 修正了 {corrected_count} 个事件的分类")
+
+        return events
+
     async def extract_events_for_user(self, user_id: str) -> Dict:
         """为单个用户抽象事件（内部调用批量接口）
 
@@ -254,20 +306,26 @@ class EventExtractionService:
                         # 删除该用户的旧事件
                         cursor.execute("DELETE FROM extracted_events WHERE user_id = ?", (user_id,))
 
+                        # TODO: 规则后处理已暂时禁用，先测试改进后的 prompt 效果
+                        # raw_behaviors = user_data_map[user_id]["raw_behaviors"]
+                        # events = self._post_process_event_categories(events, raw_behaviors)
+
                         event_ids = []
+                        raw_behaviors = user_data_map[user_id]["raw_behaviors"]
                         for idx, event in enumerate(events):
                             event_id = f"{user_id}_event_{idx+1}"
                             cursor.execute("""
                                 INSERT INTO extracted_events
-                                (event_id, user_id, event_type, timestamp, context, source_behavior_ids)
-                                VALUES (?, ?, ?, ?, ?, ?)
+                                (event_id, user_id, event_type, timestamp, context, event_category, source_behavior_ids)
+                                VALUES (?, ?, ?, ?, ?, ?, ?)
                             """, (
                                 event_id,
                                 user_id,
                                 event.get("event_type", ""),
                                 event.get("timestamp", ""),
                                 json.dumps(event.get("context", {}), ensure_ascii=False),
-                                json.dumps([b["id"] for b in user_data_map[user_id]["raw_behaviors"]], ensure_ascii=False)
+                                event.get("category", "engagement"),
+                                json.dumps([b["id"] for b in raw_behaviors], ensure_ascii=False)
                             ))
                             event_ids.append(event_id)
 

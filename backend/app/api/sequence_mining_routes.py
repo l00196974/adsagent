@@ -19,8 +19,11 @@ mining_service = SequenceMiningService()
 class MiningRequest(BaseModel):
     algorithm: str = Field("prefixspan", description="算法类型: prefixspan 或 attention")
     min_support: int = Field(2, ge=1, le=100, description="最小支持度")
+    min_length: int = Field(2, ge=1, le=10, description="最小序列长度")
     max_length: int = Field(3, ge=2, le=5, description="最大序列长度 (限制为5以控制内存使用)")
     top_k: int = Field(20, ge=1, le=100, description="返回前K个模式")
+    target_label: Optional[str] = Field(None, description="目标结果标签（如'首购'、'换车'、'观望'等），为None时挖掘所有用户")
+    target_events: Optional[List[str]] = Field(None, description="目标事件列表（如['购买', '加购']），为None时挖掘所有序列")
 
 
 class SavePatternsRequest(BaseModel):
@@ -43,14 +46,17 @@ async def mine_frequent_patterns(request: MiningRequest):
     """
     try:
         memory_monitor.log_memory_usage("API调用开始")
-        app_logger.info(f"开始挖掘高频子序列: algorithm={request.algorithm}, min_support={request.min_support}, max_length={request.max_length}")
+        app_logger.info(f"开始挖掘高频子序列: algorithm={request.algorithm}, min_support={request.min_support}, min_length={request.min_length}, max_length={request.max_length}, target_label={request.target_label}, target_events={request.target_events}")
         app_logger.warning(f"内存优化模式: max_length限制为{request.max_length}, 将处理最多50,000条序列")
 
         result = mining_service.mine_frequent_subsequences(
             algorithm=request.algorithm,
             min_support=request.min_support,
+            min_length=request.min_length,
             max_length=request.max_length,
-            top_k=request.top_k
+            top_k=request.top_k,
+            target_label=request.target_label,
+            target_events=request.target_events
         )
 
         memory_monitor.log_memory_usage("API调用完成")
@@ -138,6 +144,23 @@ async def get_saved_patterns(limit: int = 100, offset: int = 0):
 
     except Exception as e:
         app_logger.error(f"查询保存的模式失败: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"查询失败: {str(e)}")
+
+
+@router.get("/event-types")
+async def get_event_types():
+    """获取所有事件类型列表（用于目标事件选择）"""
+    try:
+        event_types = mining_service.get_event_types()
+
+        return {
+            "code": 0,
+            "message": "查询成功",
+            "data": event_types
+        }
+
+    except Exception as e:
+        app_logger.error(f"查询事件类型失败: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"查询失败: {str(e)}")
 
 

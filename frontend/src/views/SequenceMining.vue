@@ -71,6 +71,20 @@
 
         <el-row :gutter="20">
           <el-col :span="12">
+            <el-form-item label="最小序列长度">
+              <el-input-number
+                v-model="miningForm.min_length"
+                :min="1"
+                :max="10"
+                placeholder="最小序列长度"
+              />
+              <el-tooltip content="挖掘的子序列的最小长度" placement="top">
+                <el-icon style="margin-left: 10px; cursor: help"><QuestionFilled /></el-icon>
+              </el-tooltip>
+            </el-form-item>
+          </el-col>
+
+          <el-col :span="12">
             <el-form-item label="最大序列长度">
               <el-input-number
                 v-model="miningForm.max_length"
@@ -83,7 +97,9 @@
               </el-tooltip>
             </el-form-item>
           </el-col>
+        </el-row>
 
+        <el-row :gutter="20">
           <el-col :span="12">
             <el-form-item label="返回模式数量">
               <el-input-number
@@ -93,6 +109,35 @@
                 placeholder="返回前K个模式"
               />
               <el-tooltip content="返回的最高频模式数量" placement="top">
+                <el-icon style="margin-left: 10px; cursor: help"><QuestionFilled /></el-icon>
+              </el-tooltip>
+            </el-form-item>
+          </el-col>
+        </el-row>
+
+        <el-row :gutter="20">
+          <el-col :span="24">
+            <el-form-item label="目标事件（可多选）">
+              <el-select
+                v-model="miningForm.target_events"
+                placeholder="选择目标事件（可多选，留空则挖掘所有序列）"
+                clearable
+                filterable
+                multiple
+                collapse-tags
+                collapse-tags-tooltip
+              >
+                <el-option label="购买" value="购买" />
+                <el-option label="加购" value="加购" />
+                <el-option label="到店" value="到店" />
+                <el-option label="留资" value="留资" />
+                <el-option label="试驾预约" value="试驾预约" />
+                <el-option label="咨询" value="咨询" />
+                <el-option label="浏览车型" value="浏览车型" />
+                <el-option label="搜索" value="搜索" />
+                <el-option label="对比" value="对比" />
+              </el-select>
+              <el-tooltip content="挖掘以选定事件结尾的行为路径，支持多选" placement="top">
                 <el-icon style="margin-left: 10px; cursor: help"><QuestionFilled /></el-icon>
               </el-tooltip>
             </el-form-item>
@@ -407,8 +452,10 @@ import { mineFrequentPatterns } from '@/api/index.js'
 const miningForm = ref({
   algorithm: 'prefixspan',
   min_support: 2,
+  min_length: 2,
   max_length: 5,
-  top_k: 20
+  top_k: 20,
+  target_events: []  // 改为数组，支持多选
 })
 
 const mining = ref(false)
@@ -603,8 +650,10 @@ const resetForm = () => {
   miningForm.value = {
     algorithm: 'prefixspan',
     min_support: 2,
+    min_length: 2,
     max_length: 5,
-    top_k: 20
+    top_k: 20,
+    target_events: []  // 改为数组
   }
   patterns.value = []
   statistics.value = null

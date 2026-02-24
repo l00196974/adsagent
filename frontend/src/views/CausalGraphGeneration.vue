@@ -25,13 +25,23 @@
           <el-checkbox
             v-for="pattern in patterns"
             :key="pattern.id"
-            :label="pattern.id"
+            :value="pattern.id"
             class="pattern-item"
           >
             <div class="pattern-content">
-              <div class="pattern-sequence">{{ pattern.pattern_sequence }}</div>
+              <div class="pattern-sequence">
+                <el-tag
+                  v-for="(event, index) in pattern.pattern"
+                  :key="index"
+                  size="small"
+                  style="margin-right: 5px"
+                >
+                  {{ event }}
+                </el-tag>
+              </div>
               <div class="pattern-stats">
-                <el-tag size="small" type="info">支持度: {{ (pattern.support * 100).toFixed(2) }}%</el-tag>
+                <el-tag size="small" type="info">支持度: {{ pattern.support }}</el-tag>
+                <el-tag size="small" type="warning">支持率: {{ pattern.frequency.toFixed(2) }}%</el-tag>
                 <el-tag size="small" type="success">用户数: {{ pattern.user_count }}</el-tag>
               </div>
             </div>
@@ -66,8 +76,8 @@
 
         <el-form-item label="使用模式">
           <el-radio-group v-model="config.useAllPatterns">
-            <el-radio :label="true">使用所有模式</el-radio>
-            <el-radio :label="false">使用选中的 {{ selectedPatternIds.length }} 个模式</el-radio>
+            <el-radio :value="true">使用所有模式</el-radio>
+            <el-radio :value="false">使用选中的 {{ selectedPatternIds.length }} 个模式</el-radio>
           </el-radio-group>
         </el-form-item>
       </el-form>
@@ -131,6 +141,7 @@ import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { listFrequentPatterns, generateCausalGraphStream } from '@/api'
+import { startLLMLog, appendLLMLog, completeLLMLog, errorLLMLog } from '@/stores/llmLog'
 
 const router = useRouter()
 
@@ -184,6 +195,9 @@ const generateGraph = async () => {
   progressText.value = '准备生成...'
   generationResult.value = null
 
+  // 启动LLM日志记录
+  startLLMLog('生成事理图谱')
+
   try {
     const params = {
       pattern_ids: config.value.useAllPatterns ? null : selectedPatternIds.value,
@@ -213,8 +227,8 @@ const generateGraph = async () => {
       },
       // onContent
       (content) => {
-        // 可以在这里显示 LLM 输出的内容
-        console.log('LLM输出:', content)
+        // 将LLM输出添加到全局日志
+        appendLLMLog(content)
       },
       // onResult
       (data) => {
@@ -222,6 +236,7 @@ const generateGraph = async () => {
         progressStatus.value = 'success'
         progressText.value = '生成完成！'
         generationResult.value = data
+        completeLLMLog()
         ElMessage.success('事理图谱生成成功')
       },
       // onError
@@ -229,6 +244,7 @@ const generateGraph = async () => {
         progress.value = 100
         progressStatus.value = 'exception'
         progressText.value = '生成失败'
+        errorLLMLog(error)
         ElMessage.error(`生成失败: ${error}`)
       }
     )
@@ -237,6 +253,7 @@ const generateGraph = async () => {
     progressStatus.value = 'exception'
     progressText.value = '生成失败'
     console.error('生成事理图谱失败:', error)
+    errorLLMLog(error.message)
     ElMessage.error(`生成失败: ${error.message}`)
   } finally {
     generating.value = false
