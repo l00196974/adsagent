@@ -287,10 +287,6 @@ const deleteGraph = async (graphId) => {
 // 渲染图谱
 const renderGraph = () => {
   if (!graphCanvas.value || !currentGraph.value) {
-    console.log('渲染条件不满足:', {
-      hasCanvas: !!graphCanvas.value,
-      hasGraph: !!currentGraph.value
-    })
     return
   }
 
@@ -300,19 +296,9 @@ const renderGraph = () => {
   const width = container.clientWidth
   const height = container.clientHeight || 600
 
-  console.log('容器尺寸:', { width, height })
-
   const graphData = currentGraph.value.graph_data
   const nodes = graphData.nodes || []
   const edges = graphData.edges || []
-
-  console.log('图谱数据:', {
-    nodeCount: nodes.length,
-    edgeCount: edges.length,
-    sampleNode: nodes[0],
-    sampleEdge: edges[0],
-    edgeKeys: edges.length > 0 ? Object.keys(edges[0]) : []
-  })
 
   if (nodes.length === 0) {
     container.innerHTML = '<div style="padding: 20px; text-align: center; color: #909399;">图谱数据为空，没有节点</div>'
@@ -321,7 +307,6 @@ const renderGraph = () => {
 
   // 验证边的引用（兼容 source/target 和 from/to 两种字段名）
   const nodeIds = new Set(nodes.map(n => String(n.id)))
-  console.log('节点ID列表:', Array.from(nodeIds))
 
   const validEdges = edges.map(e => {
     // 兼容不同的字段名
@@ -345,12 +330,6 @@ const renderGraph = () => {
       })
     }
     return hasSource && hasTarget
-  })
-
-  console.log('边验证结果:', {
-    totalEdges: edges.length,
-    validEdges: validEdges.length,
-    invalidEdges: edges.length - validEdges.length
   })
 
   const svg = d3.select(container)
@@ -398,11 +377,6 @@ const renderGraph = () => {
     const sourceId = typeof e.source === 'object' ? e.source.id : e.source
     const targetId = typeof e.target === 'object' ? e.target.id : e.target
     return sourceId !== targetId
-  })
-
-  console.log('过滤自环边:', {
-    原始边数: validEdges.length,
-    过滤后边数: nonSelfEdges.length
   })
 
   // 创建力导向图
