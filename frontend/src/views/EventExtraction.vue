@@ -310,7 +310,7 @@
 <script setup>
 import { ref, reactive, onMounted, onBeforeUnmount } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { getUserDetail, startBatchExtract, getExtractProgress, startBatchExtractStream, extractEventsForUser } from '../api/index.js'
+import { getUserDetail, startBatchExtract, getExtractProgress, startBatchExtractStream, extractEventsForUser, listEventSequences } from '../api/index.js'
 import axios from 'axios'
 import { startLLMLog, appendLLMLog, completeLLMLog, errorLLMLog } from '../stores/llmLog'
 
@@ -351,16 +351,11 @@ const loadData = async () => {
   loading.value = true
   try {
     const offset = (currentPage.value - 1) * pageSize.value
-    const response = await axios.get('/api/v1/logical-behaviors/sequences', {
-      params: {
-        limit: pageSize.value,
-        offset: offset
-      }
-    })
+    const response = await listEventSequences(pageSize.value, offset)
 
-    if (response.data.code === 0) {
-      tableData.value = response.data.data.items
-      total.value = response.data.data.total
+    if (response.code === 200) {
+      tableData.value = response.data.sequences
+      total.value = response.data.total
     } else {
       ElMessage.error('加载数据失败')
     }

@@ -447,7 +447,7 @@ import { ref, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { QuestionFilled } from '@element-plus/icons-vue'
 import axios from 'axios'
-import { mineFrequentPatterns } from '@/api/index.js'
+import { mineFrequentPatterns, getEventStats } from '@/api/index.js'
 
 const miningForm = ref({
   algorithm: 'prefixspan',
@@ -690,7 +690,7 @@ const parsePattern = (patternStr) => {
 const checkEventData = async () => {
   try {
     // 使用新的逻辑行为统计接口
-    const res = await axios.get('/api/v1/sequence-mining/event-types')
+    const res = await getEventStats()
     hasEventData.value = res.data && res.data.length > 0
   } catch (error) {
     hasEventData.value = false
