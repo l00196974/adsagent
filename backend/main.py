@@ -1,6 +1,6 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from app.api import qa_routes, base_modeling_routes, event_extraction_routes, sequence_mining_routes, causal_graph_routes
+from app.api import qa_routes, base_modeling_routes, event_extraction_routes, sequence_mining_routes, causal_graph_routes, logical_behavior_routes
 from app.core.config import settings
 from app.core.exceptions import (
     BusinessException,
@@ -44,6 +44,7 @@ app.include_router(base_modeling_routes.router, prefix="/api/v1")
 app.include_router(event_extraction_routes.router, prefix="/api/v1")
 app.include_router(sequence_mining_routes.router, prefix="/api/v1")
 app.include_router(causal_graph_routes.router, prefix="/api/v1")
+app.include_router(logical_behavior_routes.router, prefix="/api/v1")
 
 @app.get("/health")
 async def health():
@@ -61,7 +62,8 @@ async def root():
             "event_extraction": "/api/v1/events",
             "qa": "/api/v1/qa",
             "sequence_mining": "/api/v1/mining",
-            "causal_graph": "/api/v1/causal-graph"
+            "causal_graph": "/api/v1/causal-graph",
+            "logical_behaviors": "/api/v1/logical-behaviors"
         }
     }
 

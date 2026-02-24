@@ -430,21 +430,70 @@ class BaseModelingService:
     # ========== 用户画像管理 ==========
 
     def import_user_profiles(self, profiles: List[Dict]) -> Dict:
-        """导入用户画像（非结构化格式）"""
+        """导入用户画像（支持结构化和非结构化格式）
+
+        支持两种格式:
+        1. 结构化格式: {user_id, age, gender, city, occupation, income, interests, ...}
+        2. 非结构化格式: {user_id, profile_text}
+
+        系统会自动检测格式并处理:
+        - 如果有 profile_text 字段，直接使用
+        - 如果有结构化字段（age, gender等），自动生成 profile_text
+        """
         try:
+            from app.utils.profile_formatter import format_profile_text
+            import json
+
             saved_count = 0
             with sqlite3.connect(self.db_path) as conn:
                 cursor = conn.cursor()
+
                 for profile in profiles:
+                    user_id = profile.get("user_id")
+                    if not user_id:
+                        continue
+
+                    # 检测格式：是否有 profile_text 字段
+                    has_profile_text = "profile_text" in profile and profile["profile_text"]
+
+                    # 提取结构化字段
+                    age = profile.get("age")
+                    gender = profile.get("gender")
+                    city = profile.get("city")
+                    occupation = profile.get("occupation")
+
+                    # 构建 properties JSON（存储额外字段）
+                    properties = {}
+                    for key in ["income", "interests", "budget", "has_car", "purchase_intent"]:
+                        if key in profile and profile[key] is not None:
+                            properties[key] = profile[key]
+
+                    properties_json = json.dumps(properties, ensure_ascii=False) if properties else None
+
+                    # 生成或使用 profile_text
+                    if has_profile_text:
+                        # 使用提供的 profile_text
+                        profile_text = profile["profile_text"]
+                    else:
+                        # 从结构化数据生成 profile_text
+                        profile_text = format_profile_text(profile)
+
+                    # 插入数据（支持所有字段）
                     cursor.execute("""
                         INSERT OR REPLACE INTO user_profiles
-                        (user_id, profile_text)
-                        VALUES (?, ?)
+                        (user_id, age, gender, city, occupation, properties, profile_text)
+                        VALUES (?, ?, ?, ?, ?, ?, ?)
                     """, (
-                        profile.get("user_id"),
-                        profile.get("profile_text")
+                        user_id,
+                        age,
+                        gender,
+                        city,
+                        occupation,
+                        properties_json,
+                        profile_text
                     ))
                     saved_count += 1
+
                 conn.commit()
 
             app_logger.info(f"成功导入 {saved_count} 个用户画像")
@@ -460,14 +509,29 @@ class BaseModelingService:
             }
 
     def query_user_profiles(self, user_id: Optional[str] = None, limit: int = 100, offset: int = 0) -> Dict:
-        """查询用户画像（非结构化格式）
+        """查询用户画像（支持结构化和非结构化格式）
 
         Args:
             user_id: 可选，指定用户ID则只查询该用户
             limit: 返回数量限制
             offset: 偏移量
+
+        Returns:
+            返回包含结构化和非结构化数据的字典，包括:
+            - id: 记录ID
+            - user_id: 用户ID
+            - age: 年龄
+            - gender: 性别
+            - city: 城市
+            - occupation: 职业
+            - properties: 额外属性（JSON）
+            - profile_text: 自然语言描述
+            - created_at: 创建时间
         """
         try:
+            from app.utils.profile_formatter import format_profile_text
+            import json
+
             with sqlite3.connect(self.db_path) as conn:
                 cursor = conn.cursor()
 
@@ -477,7 +541,7 @@ class BaseModelingService:
                     total = cursor.fetchone()[0]
 
                     cursor.execute("""
-                        SELECT id, user_id, profile_text, created_at
+                        SELECT id, user_id, age, gender, city, occupation, properties, profile_text, created_at
                         FROM user_profiles
                         WHERE user_id = ?
                         ORDER BY created_at DESC
@@ -489,7 +553,7 @@ class BaseModelingService:
                     total = cursor.fetchone()[0]
 
                     cursor.execute("""
-                        SELECT id, user_id, profile_text, created_at
+                        SELECT id, user_id, age, gender, city, occupation, properties, profile_text, created_at
                         FROM user_profiles
                         ORDER BY created_at DESC
                         LIMIT ? OFFSET ?
@@ -497,12 +561,33 @@ class BaseModelingService:
 
                 items = []
                 for row in cursor.fetchall():
-                    items.append({
+                    profile_data = {
                         "id": row[0],
                         "user_id": row[1],
-                        "profile_text": row[2],
-                        "created_at": row[3]
-                    })
+                        "age": row[2],
+                        "gender": row[3],
+                        "city": row[4],
+                        "occupation": row[5],
+                        "properties": row[6],
+                        "created_at": row[8]
+                    }
+
+                    # 如果 profile_text 为空，从结构化数据生成
+                    profile_text = row[7]
+                    if not profile_text:
+                        # 构建完整的 profile 字典用于格式化
+                        format_dict = {
+                            "user_id": row[1],
+                            "age": row[2],
+                            "gender": row[3],
+                            "city": row[4],
+                            "occupation": row[5],
+                            "properties": row[6]
+                        }
+                        profile_text = format_profile_text(format_dict)
+
+                    profile_data["profile_text"] = profile_text
+                    items.append(profile_data)
 
                 return {
                     "items": items,

@@ -190,21 +190,29 @@ async def start_batch_extract_stream(request: ExtractEventsRequest = None):
                             # 删除旧事件
                             cursor.execute("DELETE FROM extracted_events WHERE user_id = ?", (user_id,))
 
-                            # 插入新事件
+                            # 插入新事件并收集 event_id 列表
                             import uuid
+                            event_ids = []
                             for event in user_events:
                                 event_id = f"{user_id}_{uuid.uuid4().hex[:8]}"
+                                event_ids.append(event_id)
                                 context_json = json.dumps(event.get("context"), ensure_ascii=False) if isinstance(event.get("context"), dict) else event.get("context")
                                 cursor.execute("""
-                                    INSERT INTO extracted_events (event_id, user_id, event_type, timestamp, context, created_at)
-                                    VALUES (?, ?, ?, ?, ?, datetime('now'))
-                                """, (event_id, user_id, event.get("event_type"), event.get("timestamp"), context_json))
+                                    INSERT INTO extracted_events (event_id, user_id, event_type, timestamp, context, event_category, created_at)
+                                    VALUES (?, ?, ?, ?, ?, ?, datetime('now'))
+                                """, (event_id, user_id, event.get("event_type"), event.get("timestamp"), context_json, event.get("category", "engagement")))
 
-                            # 更新event_sequences表
+                            # 更新event_sequences表 - 存储 event_id 数组
                             cursor.execute("""
-                                INSERT OR REPLACE INTO event_sequences (user_id, sequence)
-                                VALUES (?, ?)
-                            """, (user_id, json.dumps(user_events, ensure_ascii=False)))
+                                INSERT OR REPLACE INTO event_sequences (user_id, sequence, start_time, end_time, status)
+                                VALUES (?, ?, ?, ?, ?)
+                            """, (
+                                user_id,
+                                json.dumps(event_ids, ensure_ascii=False),
+                                user_events[0].get("timestamp") if user_events else None,
+                                user_events[-1].get("timestamp") if user_events else None,
+                                "success"
+                            ))
 
                             conn.commit()
 
@@ -424,20 +432,28 @@ async def extract_events_for_user_llm_stream(user_id: str):
                     # 删除该用户的旧事件
                     cursor.execute("DELETE FROM extracted_events WHERE user_id = ?", (user_id,))
 
-                    # 插入新事件
+                    # 插入新事件并收集 event_id 列表
                     import uuid
+                    event_ids_list = []
                     for event in events:
                         event_id = f"{user_id}_{uuid.uuid4().hex[:8]}"
+                        event_ids_list.append(event_id)
                         cursor.execute("""
-                            INSERT INTO extracted_events (event_id, user_id, event_type, timestamp, context, created_at)
-                            VALUES (?, ?, ?, ?, ?, datetime('now'))
-                        """, (event_id, user_id, event.get("event_type"), event.get("timestamp"), json.dumps(event.get("context"), ensure_ascii=False)))
+                            INSERT INTO extracted_events (event_id, user_id, event_type, timestamp, context, event_category, created_at)
+                            VALUES (?, ?, ?, ?, ?, ?, datetime('now'))
+                        """, (event_id, user_id, event.get("event_type"), event.get("timestamp"), json.dumps(event.get("context"), ensure_ascii=False), event.get("category", "engagement")))
 
-                    # 更新event_sequences表
+                    # 更新event_sequences表 - 存储 event_id 数组
                     cursor.execute("""
-                        INSERT OR REPLACE INTO event_sequences (user_id, sequence)
-                        VALUES (?, ?)
-                    """, (user_id, json.dumps(events, ensure_ascii=False)))
+                        INSERT OR REPLACE INTO event_sequences (user_id, sequence, start_time, end_time, status)
+                        VALUES (?, ?, ?, ?, ?)
+                    """, (
+                        user_id,
+                        json.dumps(event_ids_list, ensure_ascii=False),
+                        events[0].get("timestamp") if events else None,
+                        events[-1].get("timestamp") if events else None,
+                        "success"
+                    ))
 
                     conn.commit()
 

@@ -830,8 +830,16 @@ APP名称: {app_name}
 
             # 格式化行为描述
             for behavior in behaviors:
-                formatted = self._format_enriched_behavior(behavior)
-                user_behaviors_str += f"  - {formatted}\n"
+                # 优先使用 behavior_text（非结构化格式）
+                if "behavior_text" in behavior:
+                    timestamp = behavior.get("timestamp", "")
+                    behavior_text = behavior.get("behavior_text", "")
+                    # 在behavior_text前面加上时间戳
+                    user_behaviors_str += f"  - {timestamp} {behavior_text}\n"
+                else:
+                    # 兼容结构化格式（使用丰富后的数据）
+                    formatted = self._format_enriched_behavior(behavior)
+                    user_behaviors_str += f"  - {formatted}\n"
 
         prompt = f"""你是用户行为分析专家。请将用户的原始行为抽象为高层次事件。
 

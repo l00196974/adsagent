@@ -9,9 +9,20 @@ def format_behavior_text(row):
     """将结构化数据转换为非结构化文本"""
     action, item_id, app_id, media_id, poi_id, duration, properties = row
 
-    parts = []
+    # 在文本前面加上 action 标识，帮助 LLM 识别
+    parts = [f"[action={action}]"]
 
-    if action == "visit_poi" and poi_id:
+    if action == "purchase" and item_id:
+        # 购买行为
+        parts.append(f"购买{item_id}")
+        if poi_id:
+            parts.append(f"在{poi_id}")
+    elif action == "add_cart" and item_id:
+        # 加购行为
+        parts.append(f"将{item_id}加入购物车")
+        if app_id:
+            parts.append(f"在{app_id}上")
+    elif action == "visit_poi" and poi_id:
         parts.append(f"在{poi_id}停留")
         if duration:
             hours = duration // 3600
@@ -49,7 +60,7 @@ def format_behavior_text(row):
 
 def convert_behavior_data():
     """转换行为数据"""
-    db_path = "backend/data/graph.db"
+    db_path = "data/graph.db"
     conn = sqlite3.connect(db_path)
     cursor = conn.cursor()
 

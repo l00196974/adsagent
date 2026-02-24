@@ -240,29 +240,51 @@ class SequenceCacheService:
         key = f"sequences:limit_{limit}"
         self.cache.set(key, sequences, ttl)
 
-    def get_patterns(self, min_support: int, max_length: int) -> Optional[Any]:
+    def get_patterns(
+        self,
+        min_support: int,
+        max_length: int,
+        target_label: Optional[str] = None,
+        target_event: Optional[str] = None,
+        target_category: Optional[str] = None
+    ) -> Optional[Any]:
         """获取缓存的模式数据
 
         Args:
             min_support: 最小支持度
             max_length: 最大长度
+            target_label: 目标标签
+            target_event: 目标事件
+            target_category: 目标分类
 
         Returns:
             模式列表或None
         """
-        key = f"patterns:support_{min_support}_length_{max_length}"
+        key = f"patterns:support_{min_support}_length_{max_length}_label_{target_label}_event_{target_event}_category_{target_category}"
         return self.cache.get(key)
 
-    def set_patterns(self, patterns: Any, min_support: int, max_length: int, ttl: int = 600) -> None:
+    def set_patterns(
+        self,
+        patterns: Any,
+        min_support: int,
+        max_length: int,
+        target_label: Optional[str] = None,
+        target_event: Optional[str] = None,
+        target_category: Optional[str] = None,
+        ttl: int = 600
+    ) -> None:
         """缓存模式数据
 
         Args:
             patterns: 模式列表
             min_support: 最小支持度
             max_length: 最大长度
+            target_label: 目标标签
+            target_event: 目标事件
+            target_category: 目标分类
             ttl: 过期时间（秒）
         """
-        key = f"patterns:support_{min_support}_length_{max_length}"
+        key = f"patterns:support_{min_support}_length_{max_length}_label_{target_label}_event_{target_event}_category_{target_category}"
         self.cache.set(key, patterns, ttl)
 
     def invalidate_sequences(self) -> None:

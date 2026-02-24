@@ -152,6 +152,34 @@ class GraphPersistence:
                 )
             """)
 
+            # 逻辑行为生成模块表
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS logical_behaviors (
+                    id TEXT PRIMARY KEY,
+                    user_id TEXT NOT NULL,
+                    agent TEXT NOT NULL,
+                    scene TEXT NOT NULL,
+                    action TEXT NOT NULL,
+                    object TEXT NOT NULL,
+                    start_time TIMESTAMP NOT NULL,
+                    end_time TIMESTAMP NOT NULL,
+                    raw_behavior_ids TEXT NOT NULL,
+                    confidence REAL DEFAULT 1.0,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS logical_behavior_sequences (
+                    user_id TEXT PRIMARY KEY,
+                    status TEXT NOT NULL,
+                    behavior_count INTEGER DEFAULT 0,
+                    error_message TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+
             # 序列模式挖掘模块表
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS frequent_patterns (
@@ -260,6 +288,8 @@ class GraphPersistence:
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_extracted_events_user ON extracted_events(user_id)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_extracted_events_timestamp ON extracted_events(timestamp)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_event_sequences_user ON event_sequences(user_id)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_logical_behaviors_user ON logical_behaviors(user_id)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_logical_behaviors_time ON logical_behaviors(start_time, end_time)")
 
             conn.commit()
             logger.info(f"数据库初始化完成: {self.db_path}")

@@ -332,7 +332,7 @@ async def list_user_profiles(
 ):
     """查询用户画像"""
     try:
-        result = modeling_service.query_user_profiles(limit, offset)
+        result = modeling_service.query_user_profiles(user_id=None, limit=limit, offset=offset)
         return {
             "code": 0,
             "data": result

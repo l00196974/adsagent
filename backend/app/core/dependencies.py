@@ -2,11 +2,13 @@
 FastAPI依赖注入 - 解决并发安全问题
 """
 from typing import Generator
+from fastapi import Depends
 from app.core.graph_db import GraphDatabase
 from app.services.knowledge_graph import KnowledgeGraphBuilder
 from app.services.sample_manager import SampleManager
 from app.services.qa_engine import QAEngine
 from app.services.event_graph import EventGraphBuilder
+from app.services.logical_behavior import LogicalBehaviorGenerator
 from app.core.openai_client import OpenAIClient
 from app.core.config import settings
 from app.core.logger import app_logger
@@ -81,5 +83,21 @@ def get_event_graph_builder(
     builder = EventGraphBuilder(llm_client=llm_client)
     try:
         yield builder
+    finally:
+        pass
+
+
+# ========== 逻辑行为生成器依赖 ==========
+
+def get_logical_behavior_generator(
+    llm_client: OpenAIClient = Depends(get_llm_client)
+) -> Generator[LogicalBehaviorGenerator, None, None]:
+    """获取逻辑行为生成器（每个请求独立实例）"""
+    if not llm_client:
+        # 如果没有传入llm_client，创建一个新的
+        llm_client = OpenAIClient() if settings.openai_api_key else None
+    generator = LogicalBehaviorGenerator(llm_client=llm_client)
+    try:
+        yield generator
     finally:
         pass
