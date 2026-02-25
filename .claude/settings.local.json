@@ -88,7 +88,9 @@
       "Bash(dmesg:*)",
       "Bash(sort:*)",
       "Bash(git checkout:*)",
-      "Bash(git show-ref:*)"
+      "Bash(git show-ref:*)",
+      "Bash(/tmp/test_final.py:*)",
+      "Bash(__NEW_LINE_36eb72398008d3a7__ python3 /tmp/test_final.py)"
     ]
   }
 }
