@@ -44,4 +44,6 @@ build/
 
 # 数据文件
 data/*.json
+data/*.db
+backend/data/*.db
 !data/.gitkeep
