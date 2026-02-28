@@ -1,0 +1,39 @@
+# Backend
+backend/__pycache__
+backend/**/__pycache__
+backend/*.pyc
+backend/**/*.pyc
+backend/.env
+backend/data/*.db
+backend/data/*.db-wal
+backend/data/*.db-shm
+backend/logs/*.log
+backend/.pytest_cache
+backend/.venv
+backend/venv
+
+# Frontend
+frontend/node_modules
+frontend/dist
+frontend/.env
+frontend/.env.local
+frontend/.env.*.local
+
+# Git
+.git
+.gitignore
+
+# IDE
+.vscode
+.idea
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Documentation
+*.md
+!README.md

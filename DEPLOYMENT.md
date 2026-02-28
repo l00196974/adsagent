@@ -78,14 +78,20 @@ npm run dev
 
 ### 使用Docker Compose (推荐)
 
+**一键部署步骤**:
+
 1. 配置环境变量
 
 ```bash
+# 复制环境变量模板
 cp .env.example .env
-# 编辑.env设置生产配置
+
+# 编辑.env文件，设置你的API密钥（必需）
+nano .env  # 或使用其他编辑器
+# 将 OPENAI_API_KEY=your_api_key_here 改为你的实际API密钥
 ```
 
-2. 启动服务
+2. 启动服务（首次启动会自动构建镜像）
 
 ```bash
 docker-compose up -d
@@ -94,14 +100,38 @@ docker-compose up -d
 3. 查看日志
 
 ```bash
+# 查看所有服务日志
 docker-compose logs -f
+
+# 只查看后端日志
+docker-compose logs -f backend
+
+# 只查看前端日志
+docker-compose logs -f frontend
 ```
 
-4. 停止服务
+4. 访问应用
+
+- 前端: http://localhost （或 http://your-server-ip）
+- 后端API: http://localhost:8000
+
+5. 停止服务
 
 ```bash
 docker-compose down
 ```
+
+6. 重新构建（代码更新后）
+
+```bash
+docker-compose up -d --build
+```
+
+**注意事项**:
+- 首次启动需要下载基础镜像和构建，可能需要5-10分钟
+- 确保80端口和8000端口未被占用
+- 数据库文件会持久化到 `backend/data` 目录
+- 日志文件会持久化到 `backend/logs` 目录
 
 ### 手动部署
 

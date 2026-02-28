@@ -1,0 +1,25 @@
+version: '3.8'
+
+services:
+  backend:
+    build: ./backend
+    ports:
+      - "8000:8000"
+    environment:
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - OPENAI_BASE_URL=${OPENAI_BASE_URL:-https://api.minimaxi.com/v1}
+      - PRIMARY_MODEL=${PRIMARY_MODEL:-MiniMax-M2.1}
+      - REASONING_MODEL=${REASONING_MODEL:-MiniMax-M2.1}
+      - MAX_LLM_WORKERS=${MAX_LLM_WORKERS:-4}
+    volumes:
+      - ./backend/data:/app/data
+      - ./backend/logs:/app/logs
+    restart: unless-stopped
+
+  frontend:
+    build: ./frontend
+    ports:
+      - "80:80"
+    depends_on:
+      - backend
+    restart: unless-stopped
